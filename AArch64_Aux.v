@@ -7,6 +7,7 @@ Require Import aarch64_types aarch64 AArch64_Trivia.
 
 Import List.ListNotations.
 Import Word.Notations.
+Local Open Scope list_scope.
 Local Open Scope word_scope.
 Local Open Scope equiv_scope.
 Local Open Scope Z.
@@ -500,20 +501,11 @@ rewrite read_S1TranslationRegime_eq_0_false.
 assumption.
 Qed.
 
-Definition read_mem_word {addrsize : Z} (addr : mword addrsize) (len : Z) `{ArithFact (len >= 0)} (s : sequential_state regstate) : option (mword (8 * len)) :=
+Definition read_mem_word {addrsize : Z} (addr : mword addrsize) (len : Z) `{ArithFact (len >=? 0)} (s : sequential_state regstate) : option (mword (8 * len)) :=
   option_bind (get_mem_bytes (wordToNat (get_word addr)) (Z.to_nat len) s)
               (fun '(bytes,_) => of_bits (bits_of_mem_bytes bytes)).
 
-(* TODO: make proofs irrelevant by expressing properties as booleans? *)
-Lemma to_word_irr n pf1 pf2 w :
-  @to_word n pf1 w = @to_word n pf2 w.
-unfold to_word.
-destruct n; auto.
-exfalso.
-auto with zarith.
-Qed.
-
-Lemma PrePostE_read_ram (*[PrePostE_atomI]:*) addrsize (addr : mword addrsize) len `{ArithFact (len >= 0)} hexRAM Q (E : ex exception -> _ -> Prop) :
+Lemma PrePostE_read_ram (*[PrePostE_atomI]:*) addrsize (addr : mword addrsize) len `{ArithFact (len >=? 0)} hexRAM Q (E : ex exception -> _ -> Prop) :
   PrePostE (fun s => (exists w, read_mem_word addr len s = Some w /\ Q w s)) (liftS (aarch64_extras.read_ram addrsize len hexRAM addr)) Q E.
 unfold aarch64_extras.read_ram, liftS.
 PrePostE_rewrite liftState.
@@ -529,8 +521,9 @@ cbv [option_bind] in EQ.
 simpl in EQ. simpl.
 match goal with |- context[just_list ?v] => destruct (just_list v) end; try discriminate.
 simpl in EQ |- *.
-injection EQ as EQ'.
-erewrite to_word_irr.
+injection EQ.
+replace_ArithFact_proof.
+intro EQ'.
 rewrite EQ'.
 apply q.
 Qed.
@@ -561,7 +554,7 @@ destruct n.
   constructor.
 Qed.
 
-Lemma read_mem_word_addrextend addrsize (addr : mword addrsize) len (H : ArithFact (len >= 0)) m (H' : ArithFact (m >= addrsize)) s :
+Lemma read_mem_word_addrextend addrsize (addr : mword addrsize) len (H : ArithFact (len >=? 0)) m (H' : ArithFact (m >=? addrsize)) s :
   read_mem_word addr len s = read_mem_word (zero_extend addr m) len s.
 unfold read_mem_word, zero_extend.
 f_equal.
@@ -573,11 +566,420 @@ f_equal.
   - apply EqdepFacts.f_eq_dep_non_dep.
     apply EqdepFacts.eq_dep_sym.
     apply get_cast_to_mword.
-* simpl (@mword_Bitvector _ _).
-  
+* replace_ArithFact_proof. reflexivity. 
+Qed.
 
-Lemma PrePostE_aget__Mem (*[PrePostE_atomI]:*) len `{ArithFact (len >= 0)} desc accdesc Q E :
-  PrePostE (fun s => List.In len [1; 2; 4; 8; 16] /\ aligned (AddressDescriptor_physicaladdress desc) len /\
+Local Open Scope nat.
+Lemma genlist_sum A (f : nat -> A) m n :
+  genlist f (m + n) = genlist f m ++ genlist (fun i => f (m+i)) n.
+unfold genlist.
+generalize (@nil A) at 1 3.
+induction n.
+* simpl.
+  rewrite Nat.add_0_r.
+  induction m; auto; intros.
+  simpl. rewrite IHm. rewrite (IHm [f m]).
+  rewrite <- List.app_assoc.
+  reflexivity.
+* rewrite Nat.add_succ_r. simpl.
+  auto.
+Qed.
+
+Lemma genlist_length A (f : nat -> A) n :
+  List.length (genlist f n) = n.
+unfold genlist.
+enough (H:forall acc, List.length (genlist_acc f n acc) = List.length acc + n) by apply H.
+induction n.
+* intros. rewrite Nat.add_comm.
+  reflexivity.
+* intros.
+  simpl.
+  rewrite IHn.
+  rewrite Nat.add_succ_r.
+  reflexivity.
+Qed.
+
+Lemma just_list_length A (l : list (option A)) l' :
+  just_list l = Some l' ->
+  List.length l' = List.length l.
+revert l'. induction l.
+* intros ? [=].
+  subst.
+  reflexivity.
+* destruct a; try discriminate.
+  simpl.
+  destruct (just_list l); try discriminate.
+  intros ? [=]. subst.
+  simpl. rewrite IHl; reflexivity.
+Qed.
+
+Local Close Scope nat.
+
+Lemma just_list_app A (l1 l2 : list (option A)) l :
+  just_list (l1 ++ l2) = Some l ->
+  exists l1' l2', just_list l1 = Some l1' /\ just_list l2 = Some l2' /\ l = l1' ++ l2'.
+revert l.
+induction l1.
+* intros l H.
+  exists [], l.
+  auto.
+* intro l.
+  destruct a.
+  + simpl.
+    destruct (just_list (l1 ++ l2)) eqn:J; try discriminate.
+    intros [=].
+    subst.
+    destruct (IHl1 l0 eq_refl) as (l1' & l2' & H1 & H2 & H3).
+    exists (a :: l1'), l2'.
+    rewrite H1, H2, H3.
+    auto.
+  + discriminate.
+Qed.
+
+Add Parametric Morphism {A : Type} : (@genlist A)
+  with signature equiv ==> eq ==> eq as genlist_morphism.
+intros f g EQ n.
+unfold genlist.
+generalize (@nil A).
+induction n.
+reflexivity.
+intro.
+simpl.
+rewrite IHn.
+f_equal.
+f_equal.
+apply EQ.
+Qed.
+
+Lemma get_mem_bytes_adj addr m n (s : sequential_state regstate) l b :
+  get_mem_bytes addr (m + n) s = Some (l,b) ->
+  exists l1 l2 b1 b2,
+    get_mem_bytes addr m s = Some (l1, b1) /\
+    get_mem_bytes (addr + m) n s = Some (l2, b2) /\
+    l = l1 ++ l2.
+cbv delta [get_mem_bytes] beta.
+rewrite genlist_sum.
+repeat match goal with |- ((let x := ?t in @?P x) = ?r) -> ?c =>
+  set (x := t);
+  change ((P x = r) -> c); cbv beta
+ end.
+destruct (just_list (map (read_byte s) addrs)) eqn:MAP; try discriminate.
+cbv beta iota delta [option_map].
+intros [=].
+subst.
+match eval unfold addrs in addrs with ?a1 ++ ?a2 => set (addrs1 := a1) in *; set (addrs2 := a2) in * end.
+change addrs with (addrs1 ++ addrs2) in MAP.
+rewrite List.map_app in MAP.
+apply just_list_app in MAP.
+destruct MAP as (l1 & l2 & JL1 & JL2 & ->).
+exists l1, l2. do 2 eexists.
+match goal with
+  |- ((let x := _ in let y := _ in let z := _ in @?P x y z) = ?r1 /\ ?r2) =>
+  change (P addrs1 read_byte read_tag = r1 /\ r2) end.
+cbv beta.
+change NatMap.key with nat.
+rewrite JL1.
+split. reflexivity.
+match goal with |- ((let x := ?a in _) = _) /\ _ => replace a with addrs2 end.
+match goal with
+  |- ((let x := _ in let y := _ in let z := _ in @?P x y z) = ?r1 /\ ?r2) =>
+  change (P addrs2 read_byte read_tag = r1 /\ r2) end.
+cbv beta.
+rewrite JL2.
+split; reflexivity.
+unfold addrs2.
+apply genlist_morphism; auto.
+intro.
+apply Nat.add_assoc.
+Qed.
+
+Lemma get_mem_bytes_length Regs addr len (s : sequential_state Regs) l b :
+  get_mem_bytes addr len s = Some (l,b) ->
+  List.length l = len.
+unfold get_mem_bytes.
+match goal with |- context[just_list ?l] => destruct (just_list l) eqn:JL; try discriminate end.
+simpl.
+intros [=]. subst.
+rewrite (just_list_length _ _ _ JL).
+rewrite List.map_length.
+rewrite genlist_length.
+reflexivity.
+Qed.
+
+Require Mword.
+
+Lemma combine_eq n (v : word n) n' (v' : word n') m (w : word m) m' (w' : word m') :
+  EqdepFacts.eq_dep _ word _ v _ v' ->
+  EqdepFacts.eq_dep _ word _ w _ w' ->
+  EqdepFacts.eq_dep _ word _ (combine v w) _ (combine v' w').
+intros H1 H2.
+destruct H1, H2.
+constructor.
+Qed.
+
+Lemma wordFromBitlist_app l1 l2 :
+  EqdepFacts.eq_dep _ word _ (wordFromBitlist (l1 ++ l2)) _ (combine (wordFromBitlist l2) (wordFromBitlist l1)).
+unfold wordFromBitlist.
+eapply EqdepFacts.eq_dep_trans. apply Mword.nat_cast_eq_dep.
+rewrite (rev_app_distr l1 l2).
+apply EqdepFacts.eq_dep_sym.
+eapply EqdepFacts.eq_dep_trans.
+eapply combine_eq; apply Mword.nat_cast_eq_dep.
+induction (rev l2).
+* simpl. constructor.
+* simpl.
+  destruct IHl.
+  constructor.
+Qed.
+
+Lemma wordFromBitlist_app' l1 l2 :
+ forall (E : _),
+ wordFromBitlist (l1 ++ l2) = eq_rect _ _ (combine (wordFromBitlist l2) (wordFromBitlist l1)) _ E.
+intro.
+apply Eqdep_dec.eq_dep_eq_dec. apply Nat.eq_dec.
+eapply EqdepFacts.eq_dep_trans.
+apply wordFromBitlist_app.
+eapply EqdepFacts.eq_dep_sym.
+apply Mword.eq_rect_eq_dep.
+Qed.
+
+Lemma fit_bbv_word_eq_rect n m o E w :
+  @fit_bbv_word n m (eq_rect o _ w _ E) = fit_bbv_word w.
+subst.
+reflexivity.
+Qed.
+
+Lemma nat_diff_eq T n ltf eqf gtf :
+  @nat_diff T n n ltf eqf gtf = eqf.
+revert dependent T.
+induction n.
+* reflexivity.
+* simpl.
+  intros.
+  apply (IHn (fun x => T (S x))).
+Qed.
+
+Lemma fit_eq_word n m v w :
+  EqdepFacts.eq_dep _ word n v m w ->
+  fit_bbv_word v = w.
+intro H.
+unfold fit_bbv_word.
+destruct H.
+rewrite nat_diff_eq.
+constructor.
+Qed.
+
+Lemma cast_T_mword p (w : mword (Z.pos p)) E :
+   @cast_T mword (Z.of_nat (Pos.to_nat p)) (Z.pos p) (@mword_of_nat (Pos.to_nat p) w) E = w.
+apply Eqdep_dec.eq_dep_eq_dec. apply Z.eq_dec.
+eapply EqdepFacts.eq_dep_trans.
+apply Mword.cast_T_eq_dep.
+apply Mword.word_mword_eq_dep.
+eapply EqdepFacts.eq_dep_trans. apply Mword.get_word_mword_of_nat.
+constructor.
+Qed.
+
+Lemma concat_0_l n (o : mword 0) (w : mword n) :
+  concat_vec o w = w.
+simpl in o.
+shatter_word o.
+unfold concat_vec.
+apply Eqdep_dec.eq_dep_eq_dec. apply Z.eq_dec.
+apply Mword.word_mword_eq_dep.
+eapply EqdepFacts.eq_dep_trans.
+apply Mword.get_word_cast_to_mword.
+rewrite combine_WO.
+eapply EqdepFacts.eq_dep_trans.
+apply Mword.eq_rect_eq_dep.
+constructor.
+Qed.
+
+Lemma to_word_combine m n (v : word (Z.to_nat m)) (w : word (Z.to_nat n)) H1 H2 H3 :
+  to_word H1 (fit_bbv_word (combine v w)) = concat_vec (to_word H2 w) (to_word H3 v).
+destruct m.
+* simpl in v. shatter_word v.
+  unfold concat_vec.
+  simpl.
+  destruct n.
+  + simpl in w. shatter_word w.
+    reflexivity.
+  + simpl.
+    apply fit_eq_word.
+    rewrite cast_T_mword.
+    constructor.
+  + exfalso. compute in H2. discriminate.
+* destruct n.
+  + simpl in w. shatter_word w. simpl.
+    apply fit_eq_word.
+    rewrite concat_0_l.
+    rewrite combine_WO.
+    eapply EqdepFacts.eq_dep_trans.
+    apply Mword.eq_rect_eq_dep.
+    constructor.
+  + simpl.
+    apply fit_eq_word.
+    assert (E : (Pos.to_nat p + Pos.to_nat p0)%nat = Pos.to_nat (p + p0))
+      by auto using Pos2Nat.inj_add.
+    eapply EqdepFacts.eq_dep_trans.
+    apply EqdepFacts.eq_dep_sym.
+    apply Mword.eq_rect_eq_dep with (E := E).
+    apply EqdepFacts.eq_dep_sym.
+    unfold concat_vec.
+    repeat match goal with |- context[Pos.to_nat ?p] => change (Pos.to_nat p) with (Z.to_nat (Z.pos p)) end.
+    match goal with |- EqdepFacts.eq_dep _ _ _ ?x _ _ => change x with (get_word x) end.
+    match goal with |- EqdepFacts.eq_dep _ _ _ _ _ ?x => change x with (get_word (x : mword (Z.pos (p + p0)))) end.
+    eapply EqdepFacts.eq_dep_trans.
+    apply Mword.get_word_cast_to_mword.
+    apply EqdepFacts.eq_dep_sym.
+    apply Mword.eq_rect_eq_dep.
+  + exfalso. compute in H2. discriminate.
+* compute in H3. discriminate.
+Qed.
+
+Lemma combine_dep_cong m n w v m' n' w' v' :
+  EqdepFacts.eq_dep nat word m w m' w' ->
+  EqdepFacts.eq_dep nat word n v n' v' ->
+  EqdepFacts.eq_dep nat word (m+n)%nat (combine w v) (m'+n')%nat (combine w' v').
+intros [] [].
+constructor.
+Qed.
+
+Lemma fit_bbv_word_eq_dep m n w :
+  m = n ->
+  EqdepFacts.eq_dep nat word _ (@fit_bbv_word m n w) _ w.
+intro; subst.
+unfold fit_bbv_word.
+rewrite nat_diff_eq.
+constructor.
+Qed.
+
+Lemma of_bits_app m n bits1 bits2 (w : mword (m + n)) H :
+  length_list bits1 = m ->
+  length_list bits2 = n ->
+  @of_bits _ (@mword_Bitvector _ H) (bits1 ++ bits2) = Some w ->
+  exists H1 H2 (w1 : mword m) (w2 : mword n),
+    @of_bits _ (@mword_Bitvector _ H1) bits1 = Some w1 /\
+    @of_bits _ (@mword_Bitvector _ H2) bits2 = Some w2 /\
+    w = concat_vec w1 w2.
+intros L1 L2.
+assert (M:m >= 0) by
+  (unfold length_list in L1; rewrite <- L1; auto using Nat2Z.is_nonneg with zarith).
+assert (N:n >= 0) by
+  (unfold length_list in L2; rewrite <- L2; auto using Nat2Z.is_nonneg with zarith).
+simpl.
+match goal with |- context[just_list ?l] => destruct (just_list l) eqn:JL end; try discriminate.
+rewrite List.map_app in JL.
+apply just_list_app in JL.
+destruct JL as (l1' & l2' & JL1 & JL2 & ->).
+simpl.
+intros [= EQ].
+rewrite JL1, JL2.
+simpl.
+apply Z_geb_ge in M as M'.
+apply Z_geb_ge in N as N'.
+exists (Build_ArithFactP _ M'), (Build_ArithFactP _ N').
+do 2 eexists.
+split. reflexivity.
+split. reflexivity.
+
+unfold length_list in L1, L2.
+assert (Lm: List.length l1' = Z.to_nat m). {
+  rewrite (just_list_length _ _ _ JL1).
+  rewrite List.map_length.
+  rewrite <- L1.
+  rewrite Nat2Z.id.
+  reflexivity.
+}
+assert (Ln: List.length l2' = Z.to_nat n). {
+  rewrite (just_list_length _ _ _ JL2).
+  rewrite List.map_length.
+  rewrite <- L2.
+  rewrite Nat2Z.id.
+  reflexivity.
+}
+
+rewrite <- EQ.
+assert (E : (Datatypes.length l2' + Datatypes.length l1')%nat = Datatypes.length (l1' ++ l2')).
+{ rewrite Nat.add_comm. symmetry. apply app_length. }
+rewrite wordFromBitlist_app' with (E := E).
+rewrite fit_bbv_word_eq_rect.
+match goal with |- @to_word _ ?H1 _ = _ => set (F := H1) end.
+rewrite <- to_word_combine with (H1 := F).
+f_equal.
+apply Eqdep_dec.eq_dep_eq_dec. apply Nat.eq_dec.
+eapply EqdepFacts.eq_dep_trans. apply fit_bbv_word_eq_dep. rewrite Lm, Ln. rewrite Z2Nat.inj_add;
+omega.
+apply EqdepFacts.eq_dep_sym.
+eapply EqdepFacts.eq_dep_trans. apply fit_bbv_word_eq_dep. rewrite Z2Nat.inj_add; omega.
+apply combine_dep_cong; apply fit_bbv_word_eq_dep; auto.
+Qed.
+
+Lemma of_mem_bytes_app n b1 b2 (w : mword (n + n)) H :
+  length_list (bits_of_mem_bytes b1) = n ->
+  length_list (bits_of_mem_bytes b2) = n ->
+  @of_bits _ (@mword_Bitvector _ H) (bits_of_mem_bytes (b2 ++ b1)) = Some w ->
+  exists H1 H2 (w1 w2 : mword n),
+    @of_bits _ (@mword_Bitvector _ H1) (bits_of_mem_bytes b1) = Some w1 /\
+    @of_bits _ (@mword_Bitvector _ H2) (bits_of_mem_bytes b2) = Some w2 /\
+    w = concat_vec w1 w2.
+unfold bits_of_mem_bytes, bits_of_bytes.
+rewrite List.rev_app_distr, List.map_app, List.concat_app.
+apply of_bits_app.
+Qed.
+
+(* This doesn't work because the address might wrap around.  In any case, it appears
+   to be unnecessary as aget__Mem is only used on smaller sizes.
+Lemma read_mem_word_128 addrsize (addr : mword addrsize) (w w0 : mword 128) s :
+  read_mem_word addr 16 s = Some w ->
+  exists w1 w2,
+  read_mem_word addr 8 s = Some w1 /\
+  read_mem_word (add_vec_int addr 8) 8 s = Some w2 /\
+  w = set_slice 128 64 (set_slice 128 64 w0 0 w1) 64 w2.
+unfold read_mem_word.
+destruct (get_mem_bytes # (get_word addr) (Z.to_nat 16)) as [[bytes b] | ] eqn:GET; try discriminate.
+intros BYTES.
+apply (get_mem_bytes_adj _ 8 8) in GET.
+destruct GET as (bytes1 & bytes2 & b1 & b2 & GET1 & GET2 & ->).
+cbv beta iota delta [option_bind] in BYTES.
+change (8 * 16) with (8 * 8 + 8 * 8) in BYTES.
+apply of_mem_bytes_app in BYTES.
+destruct BYTES as (F1 & F2 & w1 & w2 & BYTES1 & BYTES2 & ->).
+exists w1, w2.
+replace_ArithFact_proof.
+change (Z.to_nat 8) with 8%nat.
+*)
+
+Lemma sumbool_of_false (b : bool) (P : {b = true} + {b = false} -> Prop) (E : b = false) :
+  P (right E) -> P (sumbool_of_bool b).
+subst.
+intro H. apply H.
+Qed.
+
+Lemma concat_zeros_extend m n (w : mword m) `{ArithFact (n >=? 0)} :
+  concat_vec (zeros n) w = zero_extend w (n + m).
+unfold concat_vec, zeros, zero_extend, extz_vec.
+apply Eqdep_dec.eq_dep_eq_dec. apply Z.eq_dec.
+apply Mword.word_mword_eq_dep.
+eapply EqdepFacts.eq_dep_trans.
+apply Mword.get_word_cast_to_mword.
+apply EqdepFacts.eq_dep_sym.
+eapply EqdepFacts.eq_dep_trans.
+apply Mword.get_word_cast_to_mword.
+unfold zext.
+apply combine_dep_cong.
+* constructor.
+* apply EqdepFacts.eq_dep_sym.
+  eapply EqdepFacts.eq_dep_trans.
+  apply Mword.get_word_cast_to_mword.
+  rewrite Z.add_simpl_r.
+  constructor.
+Qed.
+
+(* Don't do len = 16, it doesn't appear to be used and seems to have an address wraparound
+   corner case. (Could maybe use aligned to get around this?  But don't seem to need aligned
+   anyway...) *)
+Lemma PrePostE_aget__Mem (*[PrePostE_atomI]:*) len `{ArithFact (len >=? 0)} desc accdesc Q E :
+  PrePostE (fun s => List.In len [1; 2; 4; 8] /\ aligned (AddressDescriptor_physicaladdress desc) len /\
 (eq_vec (read_CNTControlBase s) $0 || neq_vec (and_vec (AddressDescriptor_physicaladdress desc) __CNTControlMask) (read_CNTControlBase s) = true) /\
                  (match read_mem_word (AddressDescriptor_physicaladdress desc) len s with Some w => Q w s | None => False end))
             (liftS (aget__Mem desc len accdesc)) Q E.
@@ -606,33 +1008,64 @@ repeat PrePostE_step.
 * intros s (Len & Aligned & NotCNT & q).
   simpl (sumbool_of_bool false).
   cbv match beta.
-  apply Bool.orb_true_iff in NotCNT.
-  destruct NotCNT as [NoCNT | NotCNT].
-  + apply eq_vec_true_iff in NoCNT.
-    unfold read_CNTControlBase in NoCNT.
-    rewrite NoCNT.
-    intro. 
-    match goal with |- let (x,_) := ?t in _ =>
-      let t' := eval simpl in t in
-      change t with t'
-    end.
-    simpl.
 
-    intros. repeat hammer_if.
-2:{
-  intros addrlen.
-  
-}
-    - intros.
-      unfold AddressDescriptor_physicaladdress in *.
   intro.
+  simpl (projT1 (build_ex _)).
+  match goal with |- let (x,_) := ?t in _ =>
+                  destruct t as [[|] ?] eqn:CNTBase
+  end.
+  + intro.
+    apply Bool.orb_true_iff in NotCNT.
+    destruct NotCNT as [NoCNT | NotCNT].
+    - apply eq_vec_true_iff in NoCNT.
+      unfold read_CNTControlBase in NoCNT.
+      rewrite NoCNT in CNTBase.
+      simpl in CNTBase.
+      discriminate.
+    - unfold read_CNTControlBase, AddressDescriptor_physicaladdress, neq_vec in NotCNT.
+      rewrite Bool.negb_true_iff in NotCNT.
+      simpl (projT1 (existT _ _ _)).
+      simpl in NotCNT.
+      apply sumbool_of_false with (E := NotCNT).
+      intros.
+      assert (Len16 : len =? 16 = false). { apply Z.eqb_neq. compute in Len. omega. }
+      apply sumbool_of_false with (E := Len16).
+      hammer_if.
 
+      destruct (read_mem_word (AddressDescriptor_physicaladdress desc) len s) as [read |] eqn:Read_mem.
+      2: destruct q.
+      intro.
+      exists read.
+      unfold AddressDescriptor_physicaladdress in Read_mem.
+      simpl. 
+      change (id (wzero (Pos.to_nat 4))) with (zeros 4).
+      rewrite concat_zeros_extend.
+      rewrite <- read_mem_word_addrextend.
+      revert Read_mem.
+      replace_ArithFact_proof.
+      split; auto.
 
+  + intro.
+    simpl (projT1 (existT _ _ _)).
+    simpl.
+    intro.
+    assert (Len16 : len =? 16 = false). { apply Z.eqb_neq. compute in Len. omega. }
+    apply sumbool_of_false with (E := Len16).
+    intro.
 
+      destruct (read_mem_word (AddressDescriptor_physicaladdress desc) len s) as [read |] eqn:Read_mem.
+      2: destruct q.
+      exists read.
+      unfold AddressDescriptor_physicaladdress in Read_mem.
+      simpl. 
+      change (id (wzero (Pos.to_nat 4))) with (zeros 4).
+      rewrite concat_zeros_extend.
+      rewrite <- read_mem_word_addrextend.
+      revert Read_mem.
+      replace_ArithFact_proof.
+      split; auto.
+Qed.
 
-  by (strong_cong_simp add: aget__Mem_def Align__1_def Align__0_def ReadRAM_def liftState_simp)
-     (PrePostAuto simp: aligned_def of_bl_bin_word_of_int)
-*)
 Definition write_mem_bytes (addr : nat) (len : Z) (bytes : list (list bitU)) (s : sequential_state regstate) : sequential_state regstate :=
   put_mem_bytes addr (Z.to_nat len) bytes B0 (* tag *) s.
 (*     s\<lparr>memstate := foldl (\<lambda>mem (addr, b). mem(addr := Some b))

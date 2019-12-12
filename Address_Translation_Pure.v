@@ -43,7 +43,6 @@ Record Parameters := {
 
 (* TODO: move *)
 Notation "v !! n" := (getBit v n) (at level 20).
-Definition Word_slice {m n} i (v : word _) : word n := split2 i _ (split1 (i + n) m v).
 (*
 Lemma cast_to_mword 
   @cast_to_mword m n w E = 

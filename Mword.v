@@ -1,3 +1,4 @@
+Require Import Word Sail2_values Sail2_operators_mwords.
 
 Lemma cast_T_eq_dep (T : Z -> Type) (m n : Z) (x : T m) E :
   EqdepFacts.eq_dep Z T n (cast_T x E) m x.
@@ -13,6 +14,7 @@ intro H.
 apply ArithFact_mword in w.
 apply ArithFact_mword in v.
 destruct w,v.
+unbool_comparisons.
 rewrite <- Z2Nat.id with (n := n). 2: omega.
 rewrite <- Z2Nat.id with (n := m). 2: omega.
 rewrite H.
@@ -129,9 +131,6 @@ destruct n.
   constructor.
 Qed.
 
-Eval compute in (slice (mword_of_int 10 : mword 8) 1 3).
-Eval compute in (Word_slice (n := 3) 1 (mword_of_int 10 : mword 8)).
-
 Lemma autocast_eq_dep T m n x EQ :
   EqdepFacts.eq_dep Z T n (@autocast T m n x EQ) m x.
 destruct EQ.
@@ -169,6 +168,8 @@ Lemma cast_word_eq_dep m n x E :
 unfold cast_word.
 apply nat_cast_eq_dep.
 Qed.
+
+Definition Word_slice {m n} i (v : word _) : word n := split2 i _ (split1 (i + n) m v).
 
 Lemma sliceok m n i v :
   @Word_slice m n i v = cast_word (get_word (slice (mword_of_nat v) (Z.of_nat i) (Z.of_nat n))) (Nat2Z.id _).
