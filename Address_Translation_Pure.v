@@ -66,8 +66,6 @@ Notation "'word_slice' i v n" :=
    end in constr:(@Word_slice m n i v))) (at level 10, i, v at level 9).
 *)
 Definition word_size {n} (_ : word n) := n.
-Notation "'word_slice' i v n" :=
- (@Word_slice (word_size v - n - i) n i v) (at level 10, i, v at level 9).
 
 Import ConversionNotations.
 
@@ -75,7 +73,7 @@ Import ConversionNotations.
 parameters from the control registers or decoding descriptor attributes.\<close>*)
 
 Definition read_params (high : bool) (s : sequential_state regstate) : Parameters :=
-  let largegrain := if high then weqb (word_slice 30 (TCR_EL1 (ss_regstate s)) 2) $3
+  let largegrain := if high then weqb (slice (TCR_EL1 (ss_regstate s)) 30 2) $3
                     else weqb (slice (TCR_EL1 (ss_regstate s)) 14 2) ($1 : word 2) in
   let midgrain := if high then weqb (slice (TCR_EL1 (ss_regstate s)) 30 2) ($1 : word 2)
                   else weqb (slice (TCR_EL1 (ss_regstate s)) 14 2) ($2 : word 2) in
@@ -306,7 +304,7 @@ Qed.
 Definition contiguousbitcheck p level :=
   calc_contiguousbitcheck (inputsize p) (largegrain p) (midgrain p) level.
 
-Definition baseaddress (baseregister : mword 64) (baselowerbound_arg : Z) `{ArithFact (0 < baselowerbound_arg < 48)} (outputsize_arg : Z) : mword 52 :=
+Definition baseaddress (baseregister : mword 64) (baselowerbound_arg : Z) `{ArithFact (0 <? baselowerbound_arg <? 48)} (outputsize_arg : Z) : mword 52 :=
   if Z.eqb outputsize_arg 52 then
     let z := Z.max baselowerbound_arg 6 in
                  autocast (concat_vec
@@ -343,7 +341,7 @@ intro; subst.
 apply inputsize_range.
 Qed.
 
-Definition valid_vaddr (addr : mword 64) (addrtop : Z) `{ArithFact (55 <= addrtop)} (s : sequential_state regstate) : bool :=
+Definition valid_vaddr (addr : mword 64) (addrtop : Z) `{ArithFact (55 <=? addrtop)} (s : sequential_state regstate) : bool :=
   let high := addr !! Z.to_nat addrtop in
   let p := read_params high s in
   let _ := inputsize_range' high s p eq_refl in
@@ -490,7 +488,7 @@ Fixpoint read_table_aux (level : Z) (high : bool) (baseaddr : mword 52) (s : seq
   let stride := stride level p in
   let descaddrs := List.map (fun idx => wor baseaddr (shiftl (mword_of_int idx : mword 52) 3)) (index_list 0 (Z.shiftl 1 (stride - 1)) 1) in
   let read_desc :=
-      fun addr =>
+      fun addr : mword 52 =>
         match read_mem_word addr 8 s with
         | None => Invalid
         | Some desc =>
@@ -610,7 +608,7 @@ intros ->.
 apply read_AddrTop_EL0_bounds.
 Qed.
 
-Instance bits_Bitvector {a : Z} `{ArithFact (a >= 0)} : Bitvector (bits a) := mword_Bitvector.
+Instance bits_Bitvector {a : Z} `{ArithFact (a >=? 0)} : Bitvector (bits a) := mword_Bitvector.
 Instance bits1_Bitvector : Bitvector (bits 1) := mword_Bitvector.
 
 Definition lookup_TLBRecord (vaddress : mword 64) (acctype : AccType) (s : sequential_state regstate) : option TLBRecord. refine (
@@ -619,7 +617,7 @@ Definition lookup_TLBRecord (vaddress : mword 64) (acctype : AccType) (s : seque
   let high := vaddress !! Z.to_nat top in
   let p := read_params high s in
   let blb_bound := baselowerbound_bounds' _ _ p eq_refl in (* not sure why this has to be explicit - wasn't appearing in the context otherwise *)
-  let baseaddress := @baseaddress (read_TTBR high s) (baselowerbound p) (Build_ArithFact _ blb_bound) (outputsize p) in
+  let baseaddress := @baseaddress (read_TTBR high s) (baselowerbound p) _ (outputsize p) in
   let hierattrs := negb (if high then TCR_EL1 (ss_regstate s) !! 42 else TCR_EL1 (ss_regstate s) !! 41) in
   let secure := negb (SCR_EL3 (ss_regstate s) !! 0) in
   match walk_table vaddress (startlevel p) p baseaddress
