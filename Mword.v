@@ -7,6 +7,22 @@ rewrite cast_T_refl.
 constructor.
 Qed.
 
+Lemma get_cast_to_mword m n (v : word n) (EQ : Z.of_nat n = m) :
+ EqdepFacts.eq_dep _ _ _ (get_word (cast_to_mword v EQ)) _ v.
+destruct n.
+* simpl in EQ.
+  subst.
+  shatter_word v.
+  constructor.
+* simpl in EQ.
+  subst.
+  simpl.
+  rewrite cast_positive_refl.
+  rewrite SuccNat2Pos.id_succ.
+  rewrite nat_cast_same.
+  constructor.
+Qed.
+
 Lemma mword_to_nat_inj n m (w : mword n) (v : mword m) :
   Z.to_nat n = Z.to_nat m ->
   n = m.
@@ -233,4 +249,10 @@ match goal with |- context[sumbool_of_bool ?b] => destruct (sumbool_of_bool b) e
       eapply EqdepFacts.eq_dep_trans.
       apply cast_word_eq_dep.
       apply get_word_mword_of_nat.
+Qed.
+
+Lemma autocast_eq T n v EQ :
+  @autocast T n n v EQ = v.
+apply ZEqdep.eq_dep_eq.
+apply autocast_eq_dep.
 Qed.

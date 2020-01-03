@@ -373,30 +373,6 @@ rewrite ReadELIn.
 reflexivity.
 Qed.
 
-(* TODO: move *)
-Lemma eq_vec_true_iff {n} (v w : mword n) :
-  eq_vec v w = true <-> v = w.
-unfold eq_vec.
-destruct n.
-* simpl in v,w. shatter_word v. shatter_word w.
-  compute. intuition.
-* simpl in *. destruct (weq v w).
-  + subst. rewrite weqb_eq; tauto.
-  + rewrite weqb_ne; auto. intuition.
-* destruct v.
-Qed.
-
-Lemma eq_vec_false_iff {n} (v w : mword n) :
-  eq_vec v w = false <-> v <> w.
-specialize (eq_vec_true_iff v w).
-destruct (eq_vec v w).
-intuition.
-intros [H1 H2].
-split.
-* intros _ EQ. intuition.
-* auto.
-Qed.
-
 Lemma PrePostE_S1TranslationRegime__0 (*[PrePostE_atomI]:*) el Q E :
   PrePostE (fun s => AArchConsistent s /\ AlwaysAArch64 s /\ eq_bit (access_vec_dec (SCR_EL3 (ss_regstate s)) 0) B1 = true /\ Q (read_S1TranslationRegime el s) s) (liftS (S1TranslationRegime__0 el)) Q E.
 unfold S1TranslationRegime__0, read_S1TranslationRegime, liftS, get_SCR.
@@ -537,23 +513,6 @@ Lemma PrePostE_impossible {A} (m : monadS _ A _) Q (E : ex exception -> predS re
 intros s [].
 Qed.
 
-(* TODO: move *)
-Lemma get_cast_to_mword m n (v : word n) (EQ : Z.of_nat n = m) :
- EqdepFacts.eq_dep _ _ _ (get_word (cast_to_mword v EQ)) _ v.
-destruct n.
-* simpl in EQ.
-  subst.
-  shatter_word v.
-  constructor.
-* simpl in EQ.
-  subst.
-  simpl.
-  rewrite cast_positive_refl.
-  rewrite SuccNat2Pos.id_succ.
-  rewrite nat_cast_same.
-  constructor.
-Qed.
-
 Lemma read_mem_word_addrextend addrsize (addr : mword addrsize) len (H : ArithFact (len >=? 0)) m (H' : ArithFact (m >=? addrsize)) s :
   read_mem_word addr len s = read_mem_word (zero_extend addr m) len s.
 unfold read_mem_word, zero_extend.
@@ -565,7 +524,7 @@ f_equal.
     apply (wordToNat_zext (get_word addr) (Z.to_nat (m - addrsize))).
   - apply EqdepFacts.f_eq_dep_non_dep.
     apply EqdepFacts.eq_dep_sym.
-    apply get_cast_to_mword.
+    apply Mword.get_cast_to_mword.
 * replace_ArithFact_proof. reflexivity. 
 Qed.
 
@@ -1190,6 +1149,59 @@ lemma PrePostE_ZeroExtend_slice_append[PrePostE_atomI]:
                   Q E"
   by (strong_cong_simp add: ZeroExtend_slice_append_def ZeroExtend__1_def ZeroExtend__0_def word_cat_shiftl_OR slice_mask_def)
      PrePostAuto
+*)
+
+Lemma PrePostE_ZeroExtend__0 m n (xs : mword m) `{H1:ArithFact (n >=? m)} H2 (Q : mword n -> predS regstate) E :
+  PrePostE (Q (zero_extend xs n)) (liftS (@ZeroExtend__0 _ xs n H2)) Q E.
+unfold liftS, ZeroExtend__0, aarch64_extras.length, length_mword.
+PrePostE_rewrite liftState.
+eapply PrePostE_strengthen_pre.
+repeat PrePostE_step.
+destruct H1 as [GE].
+intros s q.
+rewrite GE at 1.
+intro GE'.
+rewrite concat_zeros_extend.
+repeat replace_ArithFact_proof.
+revert pf pf0.
+replace (n - m + m) with n by omega.
+intros.
+rewrite !Mword.autocast_eq.
+generalize_ArithFact_proof_in q.
+apply q.
+Qed.
+
+Lemma PrePostE_ZeroExtend__1 m n (xs : mword m) `{H1:ArithFact (n >=? m)} H2 (Q : mword n -> predS regstate) E :
+  PrePostE (Q (zero_extend xs n)) (liftS (@ZeroExtend__1 _ n xs H2)) Q E.
+unfold ZeroExtend__1.
+apply PrePostE_ZeroExtend__0.
+Qed.
+
+Lemma PrePostE_ZeroExtend_slice_append a b (xs : mword a) i l (ys : mword b) n (Q : mword n -> predS regstate) E H0 H1 H2 H3 :
+  PrePostE (Q (@zero_extend _ (concat_vec (@slice _ xs i l H0) ys) n H1))
+           (liftS (@ZeroExtend_slice_append l _ _ n xs i l ys H2 H3))
+           Q E.
+unfold liftS, ZeroExtend_slice_append.
+PrePostE_rewrite liftState.
+eapply PrePostE_strengthen_pre.
+repeat PrePostE_step.
+PPE_apply PrePostE_ZeroExtend__1.
+intros s q.
+cbv beta.
+match goal with |- if ?c then _ else _ => destruct c eqn:guard at 1 end.
+intro.
+
+repeat generalize_ArithFact_proof_in q.
+apply q.
+match goal with w:mword ?n |- _ => specialize (ArithFact_mword _ w); intro end.
+
+unfold aarch64_extras.length, length_mword in guard.
+exfalso.
+prepare_for_solver.
+omega.
+Qed.
+
+(*
 
 lemma PrePostE_bindS_ELIsInHost_False:
   assumes f: "PrePostE P (f False) Q E"

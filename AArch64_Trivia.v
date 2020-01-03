@@ -1,4 +1,4 @@
-Require Import Sail2_values Sail2_operators_mwords Hoare Word.
+Require Import Sail2_values Sail2_operators_mwords Hoare Word Mword.
 Require Import aarch64_types aarch64.
 Local Open Scope Z.
 (*
@@ -498,15 +498,92 @@ lemma aligned8_ucast:
 
 lemma aligned8_shiftl_3: "i \<ge> 3 \<Longrightarrow> aligned (x << i) 8"
   by (auto simp: aligned_8_mask_3 word_and_mask_0_iff_not_testbits nth_shiftl)
+*)
+Lemma mword_elim (P : forall n, mword n -> Prop) :
+  (forall n (w : mword (Z.of_nat n)), P (Z.of_nat n) w) ->
+  forall n w, P n w.
 
-lemma aligned8_word_cat:
-  fixes a :: "'a::len word" and b :: "'b::len word"
-  defines "c \<equiv> word_cat a b :: 'c::len word"
-  assumes b: "3 \<le> LENGTH('b)" and c: "LENGTH('b) \<le> LENGTH('c)"
-  shows "aligned c 8 \<longleftrightarrow> aligned b 8"
-  using b c unfolding c_def
-  by (auto simp: word_cat_shiftl_OR aligned8_OR_distrib aligned8_shiftl_3 aligned8_ucast)
+intros H n w.
+specialize (ArithFact_mword _ w).
+intros [GE]. apply Z_geb_ge in GE.  apply Z.ge_le in GE.
+revert w.
+rewrite <- (Z2Nat.id n GE).
+apply H.
+Qed.
 
+Lemma wordToN_eq_dep m n w v :
+  EqdepFacts.eq_dep nat word m w n v ->
+  wordToN w = wordToN v.
+intros [].
+reflexivity.
+Qed.
+
+Lemma uint_concat_vec m n (a : mword m) (b : mword n) :
+  uint_plain (concat_vec a b) = uint_plain b + 2 ^ n * uint_plain a.
+unfold uint_plain, concat_vec.
+replace (2 ^ n) with (Z.of_N (2 ^ Z.to_N n)). 2: {
+  rewrite N2Z.inj_pow.
+  rewrite Z2N.id.
+  reflexivity.
+  apply ArithFact_mword in b.
+  prepare_for_solver.
+  assumption.
+}
+rewrite <- N2Z.inj_mul.
+rewrite <- N2Z.inj_add.
+f_equal.
+replace (2 ^ Z.to_N n)%N with (Npow2 (Z.to_nat n)). 2: {
+  rewrite <- Z_nat_N, Npow2_pow.
+  reflexivity.
+}
+rewrite <- wordToN_combine.
+apply wordToN_eq_dep.
+eapply EqdepFacts.eq_dep_trans.
+apply Mword.get_cast_to_mword.
+constructor.
+Qed.
+
+Require Import Lia Psatz.
+
+Lemma aligned8_word_cat m n (a : mword m) (b : mword n) :
+  3 <= n ->
+  aligned (concat_vec a b) 8 <-> aligned b 8.
+apply mword_elim with (n := m) (w := a).
+apply mword_elim with (n := n) (w := b).
+clear.
+intros m w n v LE.
+unfold aligned.
+simpl (projT1 _).
+split.
+* intros [x EQ].
+  rewrite uint_concat_vec in EQ.
+  exists (x - 2 ^ (Z.of_nat m - 3) * uint_plain v).
+  rewrite Z.mul_sub_distr_r.
+  change 8 with (2 ^ 3) at 2.
+  rewrite <- Z.mul_assoc.
+  rewrite (Z.mul_comm (uint_plain v) (2 ^ 3)).
+  rewrite Z.mul_assoc.
+  rewrite <- Z.pow_add_r.
+  + rewrite Z.sub_add.
+    omega.
+  + omega.
+  + omega.
+* intros [x EQ].
+  rewrite uint_concat_vec.
+  rewrite <- EQ.
+  rewrite <- Z.sub_add with (n := 3) (m := Z.of_nat m).
+  exists (x + 2 ^ (Z.of_nat m - 3) * uint_plain v).
+  rewrite Z.pow_add_r.
+  + rewrite Z.mul_add_distr_r.
+    change (2^3) with 8.
+    rewrite <- Z.mul_assoc.
+    rewrite (Z.mul_comm (uint_plain v) 8).
+    rewrite Z.mul_assoc.
+    reflexivity.
+  + omega.
+  + omega.
+Qed.
+(*
 lemma slice_zeros_concat_slice_and_mask[simp]:
   fixes xs :: "'a::len word"
   shows "slice_zeros_concat outlen xs i l l' = (Word.slice (nat i) xs AND mask (nat l)) << nat l'"

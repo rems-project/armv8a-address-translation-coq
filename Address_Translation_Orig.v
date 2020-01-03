@@ -696,44 +696,45 @@ definition Parameters_EL0 where
 *)
 Definition calc_startlevel inputsize grainsize stride :=
   Z.sub 4 (round_up (div_real (to_real (Z.sub inputsize grainsize)) (to_real stride))).
-(*
-definition calc_baseaddress where
-  "calc_baseaddress baseregister baselowerbound outputsize \<equiv>
-     (if (((((ex_int outputsize)) = (( 52 :: int)::ii)))) then
-        (let z = (if ((baselowerbound < (( 6 :: int)::ii))) then (( 6 :: int)::ii) else baselowerbound) in
-        liftR (assert_exp True ('''')) \<then>
-        ((let (baseaddress :: 52 bits) =
-          ((concat_vec ((slice baseregister (( 2 :: int)::ii) (( 4 :: int)::ii)  ::  4 Word.word))
-             ((slice_zeros_concat ((((((- z)) + (( 48 :: int)::ii))) + z))
-                 baseregister z ((((- z)) + (( 48 :: int)::ii))) z
-                ::  48 Word.word))
-            ::  52 Word.word)) in
-        return baseaddress)))
-      else
-        (let (baseaddress :: 52 bits) =
-          ((place_slice (( 52 :: int)::ii) baseregister baselowerbound
-             ((((- baselowerbound)) + (( 48 :: int)::ii))) baselowerbound
-            ::  52 Word.word)) in
-        return baseaddress))"
 
-definition calc_firstblocklevel_grainsize where
-  "calc_firstblocklevel_grainsize largegrain midgrain \<equiv>
-     (if largegrain then
-       (let (grainsize :: ii) = ((( 16 :: int)::ii)) in
-       (let (firstblocklevel :: ii) = (if ((Have52BitPAExt () )) then (( 1 :: int)::ii) else (( 2 :: int)::ii)) in
-       (firstblocklevel, grainsize)))
-     else
-       (let ((firstblocklevel :: ii), (grainsize :: ii)) =
-         (if midgrain then
-           (let (grainsize :: ii) = ((( 14 :: int)::ii)) in
-           (let (firstblocklevel :: ii) = ((( 2 :: int)::ii)) in
-           (firstblocklevel, grainsize)))
-         else
-           (let (grainsize :: ii) = ((( 12 :: int)::ii)) in
-           (let (firstblocklevel :: ii) = ((( 1 :: int)::ii)) in
-           (firstblocklevel, grainsize)))) in
-       (firstblocklevel, grainsize)))"
-*)
+Definition calc_baseaddress (baseregister : mword 64) baselowerbound outputsize `{ArithFact (baselowerbound >=? 0)} :=
+  if sumbool_of_bool ((Z.eqb outputsize 52)) then
+    let 'z :=
+        projT1
+          (build_ex
+             (if sumbool_of_bool ((Z.ltb baselowerbound 6)) then 6
+              else baselowerbound)
+           : {n : Z & ArithFact (n >=? 0)}) in
+    liftR (assert_exp' (Z.geb (Z.add (Z.opp (projT1 (__id z))) 48) 0) "model/aarch_mem.sail 10457:41 - 10457:42") >>= fun _ =>
+    let baseaddress : bits 52 :=
+        autocast (concat_vec
+                    (concat_vec (slice baseregister 2 4)
+                                (slice baseregister z (Z.add (Z.opp z) 48))) (zeros z)) in
+    returnm baseaddress
+  else
+    liftR ((ZeroExtend_slice_append 52 baseregister baselowerbound
+                                    (Z.add (Z.opp baselowerbound) 48) (zeros baselowerbound)))
+  : MR (mword 52) TLBRecord.
+
+Definition calc_firstblocklevel_grainsize largegrain midgrain :=
+  (if sumbool_of_bool (largegrain) then
+     let grainsize := 16 in
+     let firstblocklevel : Z := if ((Have52BitPAExt tt)) then 1 else 2 in
+     (firstblocklevel, build_ex grainsize)
+   else
+     let '(firstblocklevel, existT _ grainsize _) :=
+         (if sumbool_of_bool (midgrain) then
+            let grainsize := 14 in
+            let firstblocklevel : Z := 2 in
+            (firstblocklevel, build_ex grainsize)
+          else
+            let grainsize := 12 in
+            let firstblocklevel : Z := 1 in
+            (firstblocklevel, build_ex grainsize))
+         : (Z * {n : Z & ArithFact (n >=? 0)}) in
+     (firstblocklevel, build_ex grainsize))
+  : (Z * {n : Z & ArithFact (n >=? 0)}).
+
 Definition calc_contiguousbitcheck inputsize largegrain midgrain level :=
   if sumbool_of_bool (largegrain) then andb (Z.eqb level 2) (Z.ltb inputsize 34)
   else if sumbool_of_bool (midgrain) then andb (Z.eqb level 2) (Z.ltb inputsize 30)

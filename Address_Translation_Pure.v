@@ -124,81 +124,10 @@ Definition midgrain p := Z.eqb (grainsize p) 14.
 Definition startlevel (p : Parameters) : Z :=
   calc_startlevel (inputsize p) (grainsize p) (grainsize p - 3).
 
-(* TODO: move *)
-Require Import Sail2_real Reals Psatz.
-
-Lemma IZRdiv m n :
-  0 < m -> 0 < n ->
-  (IZR (m / n) <= IZR m / IZR n)%R.
-intros.
-apply Rmult_le_reg_l with (r := IZR n).
-auto using IZR_lt.
-unfold Rdiv.
-rewrite <- Rmult_assoc.
-rewrite Rinv_r_simpl_m.
-rewrite <- mult_IZR.
-apply IZR_le.
-apply Z.mul_div_le.
-assumption.
-discrR.
-omega.
-Qed.
-
-Lemma round_up_div m n :
-  0 < m -> 0 < n ->
-  round_up (div_real (to_real m) (to_real n)) = (m + n - 1) / n.
-intros.
-unfold round_up, round_down, div_real, to_real.
-apply Z.eq_opp_l.
-apply Z.sub_move_r.
-symmetry.
-apply up_tech.
-
-rewrite Ropp_Ropp_IZR.
-apply Ropp_le_contravar.
-apply Rmult_le_reg_l with (r := IZR n).
-auto using IZR_lt.
-unfold Rdiv.
-rewrite <- Rmult_assoc.
-rewrite Rinv_r_simpl_m.
-rewrite <- mult_IZR.
-apply IZR_le.
-assert (diveq : n*((m+n-1)/n) = (m+n-1) - (m+n-1) mod n).
-apply Zplus_minus_eq.
-rewrite (Z.add_comm ((m+n-1) mod n)).
-apply Z.div_mod.
-omega.
-rewrite diveq.
-assert (modmax : (m+n-1) mod n < n).
-specialize (Z.mod_pos_bound (m+n-1) n). intuition.
-omega.
-
-discrR; omega.
-
-rewrite <- Z.opp_sub_distr.
-rewrite Ropp_Ropp_IZR.
-apply Ropp_lt_contravar.
-apply Rmult_lt_reg_l with (r := IZR n).
-auto using IZR_lt.
-unfold Rdiv.
-rewrite <- Rmult_assoc.
-rewrite Rinv_r_simpl_m.
-2: { discrR. omega. }
-rewrite <- mult_IZR.
-apply IZR_lt.
-rewrite Z.mul_sub_distr_l.
-apply Z.le_lt_trans with (m := m+n-1-n*1).
-apply Z.sub_le_mono_r.
-apply Z.mul_div_le.
-assumption.
-omega.
-Qed.
-
-
 Lemma startlevel_bounds high s :
   0 <= startlevel (read_params high s) < 4.
 unfold startlevel, read_params, calc_startlevel, inputsize, grainsize.
-rewrite round_up_div.
+rewrite Sail2_real.round_up_div.
 
 split.
 apply Zle_minus_le_0.
@@ -233,7 +162,7 @@ Lemma startlevel_largegrain_bounds high s p :
   1 <= startlevel p.
 intros -> GRAINSIZE.
 unfold startlevel, read_params, calc_startlevel, inputsize, grainsize in *.
-rewrite round_up_div.
+rewrite Sail2_real.round_up_div.
 2,3: repeat match goal with |- context[if ?b then _ else _] => destruct b end;
 try match goal with |- context[uint ?v] => destruct (uint v) as [i [H]]; simpl (projT1 _) end;
 try simpl in H;
@@ -272,11 +201,11 @@ omega with Z.
 Qed.
 
 Lemma baselowerbound_bounds high s :
-  0 < baselowerbound (read_params high s) < 48.
+  3 <= baselowerbound (read_params high s) < 48.
 unfold baselowerbound, read_params, startlevel, calc_startlevel, grainsize, inputsize.
 match goal with |- context[uint ?v] => destruct (uint v) as [i [H1]]; simpl (projT1 _) end;
 simpl in H1.
-rewrite round_up_div.
+rewrite Sail2_real.round_up_div.
 
 split;
 
@@ -294,11 +223,21 @@ repeat match goal with |- context[if ?b then _ else _] => destruct b end;
 omega with Z.
 Qed.
 
+Lemma baselowerbound_bounds_af high s :
+  ArithFact (0 <? baselowerbound (read_params high s) <? 48).
+constructor.
+unbool_comparisons_goal.
+specialize (baselowerbound_bounds high s).
+omega.
+Qed.
+Hint Resolve baselowerbound_bounds_af : sail.
+
 Lemma baselowerbound_bounds' high s p :
   p = read_params high s ->
   0 < baselowerbound p < 48.
 intros ->.
-apply baselowerbound_bounds.
+specialize (baselowerbound_bounds high s).
+omega.
 Qed.
 
 Definition contiguousbitcheck p level :=
@@ -312,16 +251,6 @@ Definition baseaddress (baseregister : mword 64) (baselowerbound_arg : Z) `{Arit
                                 (slice baseregister z (Z.add (Z.opp z) 48))) (zeros z))
   else
 autocast (concat_vec (zeros 4) (concat_vec (slice baseregister baselowerbound_arg (48 - baselowerbound_arg)) (zeros baselowerbound_arg))).
-
-(* TODO: move *)
-Ltac clear_proof_bodies :=
-  repeat match goal with
-  | H := _ : ?ty |- _ =>
-    match type of ty with
-    | Prop => clearbody H
-    end
-  end.
-Ltac run_solver ::= clear_proof_bodies; solve_arithfact.
 
 Lemma addrtop_inputsize_pos addrtop high s :
   55 <= addrtop ->

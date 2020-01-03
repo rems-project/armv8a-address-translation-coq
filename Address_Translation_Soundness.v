@@ -1,153 +1,280 @@
-(*<*)
+Require Import Sail2_values Sail2_values_lemmas Sail2_operators_mwords Sail2_state_monad Hoare Word.
+Require Import aarch64_types aarch64 AArch64_Trivia AArch64_Aux Address_Translation_Orig Address_Translation_Pure.
+
+Import List.ListNotations.
+Import Word.Notations.
+Local Open Scope list_scope.
+Local Open Scope word_scope.
+Local Open Scope equiv_scope.
+Local Open Scope Z.
+
+(*
 (* Author: Thomas Bauereiss *)
 theory Address_Translation_Soundness
   imports Address_Translation_Pure
 begin
-(*>*)
+
 
 section \<open>Soundness of pure characterisation\<close>
 
 subsection \<open>Assumptions on system register state\<close>
+*)
 
-abbreviation
-  "InUserMode s \<equiv>
-     read_EL s = 0 \<and>           (* Exception level 0 *)
-     SCR_EL3 (regstate s) !! 0 (* Non-Secure Mode *)"
+Definition InUserMode s :=
+     read_EL s = $0 /\                    (* Exception level 0 *)
+     SCR_EL3 (ss_regstate s) !! 0 = true. (* Non-Secure Mode *)
 
-abbreviation
-  "MMUEnabled_EL01 s \<equiv>
-     SCTLR_EL1 (regstate s) !! 0 \<and>  (* MMU enabled *)
-     \<not> TCR_EL1 (regstate s) !! 7 \<and>  (* First stage translation enabled (low) *)
-     \<not> TCR_EL1 (regstate s) !! 23 \<and> (* First stage translation enabled (high) *)
-     \<not> HCR_EL2 (regstate s) !! 27   (* Trap General Exceptions disabled;
-                                       would implicitly disable MMU in Non-Secure EL0 *)"
+Definition MMUEnabled_EL01 s :=
+     SCTLR_EL1 (ss_regstate s) !! 0 = true /\  (* MMU enabled *)
+     TCR_EL1 (ss_regstate s) !! 7  = false /\  (* First stage translation enabled (low) *)
+     TCR_EL1 (ss_regstate s) !! 23 = false /\  (* First stage translation enabled (high) *)
+     HCR_EL2 (ss_regstate s) !! 27 = false.    (* Trap General Exceptions disabled;
+                                       would implicitly disable MMU in Non-Secure EL0 *)
 
-abbreviation
-  "VirtDisabled s \<equiv>
-     \<not> HCR_EL2 (regstate s) !! 0 \<and>  \<not> HCR_EL2 (regstate s) !! 12 \<and> (* Virtualisation disabled *)
-     \<not> HCR_EL2 (regstate s) !! 42 \<and> \<not> HCR_EL2 (regstate s) !! 43 (* Nested virtualisation disabled *)"
+Definition VirtDisabled s :=
+     HCR_EL2 (ss_regstate s) !! 0 = false /\ HCR_EL2 (ss_regstate s) !! 12 = false /\ (* Virtualisation disabled *)
+     HCR_EL2 (ss_regstate s) !! 42 = false /\ HCR_EL2 (ss_regstate s) !! 43 = false. (* Nested virtualisation disabled *)
 
-abbreviation
-  "HwUpdatesFlags s \<equiv>
-     TCR_EL1 (regstate s) !! 39 \<and> (* hardware update of access flag *)
-     TCR_EL1 (regstate s) !! 40   (* hardware update of dirty bit *)"
+Definition HwUpdatesFlags s :=
+     TCR_EL1 (ss_regstate s) !! 39 = true /\ (* hardware update of access flag *)
+     TCR_EL1 (ss_regstate s) !! 40 = true.   (* hardware update of dirty bit *)
 
-abbreviation "DebugDisabled s \<equiv> DBGEN (regstate s) = LOW \<and> \<not>MDSCR_EL1 (regstate s) !! 15"
+Definition DebugDisabled s := DBGEN (ss_regstate s) = LOW /\ MDSCR_EL1 (ss_regstate s) !! 15 = false.
 
-subsection \<open>Equivalence relations for partially nondeterministic results\<close>
+(*subsection \<open>Equivalence relations for partially nondeterministic results\<close>
 
 text \<open>Some parts of the results returned by the original translation functions are UNKNOWN,
 e.g. the device type field for non-device memory or fault attributes when no fault occurred.
 In the Sail model, this is mapped to a nondeterministic choice of unknown fields.  Our pure
 characterisation of address translation only captures the deterministic parts.  The following
 equivalence relations require equality of those deterministic parts and ignore nondeterministic
-fields.\<close>
+fields.\<close>*)
 
-definition det_equiv_MemAttrHints :: "MemAttrHints \<Rightarrow> MemAttrHints \<Rightarrow> bool" where
-  "det_equiv_MemAttrHints l r \<equiv>
-     MemAttrHints_attrs l = MemAttrHints_attrs r \<and>
-     MemAttrHints_hints l = MemAttrHints_hints r"
+Definition det_equiv_MemAttrHints (l r : MemAttrHints) : Prop :=
+   MemAttrHints_attrs l = MemAttrHints_attrs r /\
+   MemAttrHints_hints l = MemAttrHints_hints r.
 
-definition det_equiv_MemoryAttributes :: "MemoryAttributes \<Rightarrow> MemoryAttributes \<Rightarrow> bool" where
-  "det_equiv_MemoryAttributes l r \<equiv>
-     MemoryAttributes_typ l = MemoryAttributes_typ r \<and>
-     (*MemoryAttributes_device l = MemoryAttributes_device r \<and>*)
-     det_equiv_MemAttrHints (MemoryAttributes_inner l) (MemoryAttributes_inner r) \<and>
-     det_equiv_MemAttrHints (MemoryAttributes_outer l) (MemoryAttributes_outer r) \<and>
-     MemoryAttributes_shareable l = MemoryAttributes_shareable r \<and>
-     MemoryAttributes_outershareable l = MemoryAttributes_outershareable r"
+Definition det_equiv_MemoryAttributes (l r : MemoryAttributes) : Prop :=
+   MemoryAttributes_typ l = MemoryAttributes_typ r /\
+   (*MemoryAttributes_device l = MemoryAttributes_device r /\*)
+   det_equiv_MemAttrHints (MemoryAttributes_inner l) (MemoryAttributes_inner r) /\
+   det_equiv_MemAttrHints (MemoryAttributes_outer l) (MemoryAttributes_outer r) /\
+   MemoryAttributes_shareable l = MemoryAttributes_shareable r /\
+   MemoryAttributes_outershareable l = MemoryAttributes_outershareable r.
 
-definition det_equiv_Permissions :: "Permissions \<Rightarrow> Permissions \<Rightarrow> bool" where
-  "det_equiv_Permissions l r \<equiv>
-     Permissions_ap l = Permissions_ap r \<and>
-     Permissions_xn l = Permissions_xn r \<and>
-     Permissions_pxn l = Permissions_pxn r"
+Definition det_equiv_Permissions (l r : Permissions) : Prop :=
+   Permissions_ap l = Permissions_ap r /\
+   Permissions_xn l = Permissions_xn r /\
+   Permissions_pxn l = Permissions_pxn r.
 
-definition det_equiv_Fault :: "FaultRecord \<Rightarrow> FaultRecord \<Rightarrow> bool" where
-  "det_equiv_Fault l r \<equiv> FaultRecord_typ l = FaultRecord_typ r"
+Definition det_equiv_Fault (l r : FaultRecord) : Prop :=
+   FaultRecord_typ l = FaultRecord_typ r.
 
-definition det_equiv_AddressDescriptor :: "AddressDescriptor \<Rightarrow> AddressDescriptor \<Rightarrow> bool" where
-  "det_equiv_AddressDescriptor l r \<equiv>
-     det_equiv_Fault (AddressDescriptor_fault l) (AddressDescriptor_fault r) \<and>
-     det_equiv_MemoryAttributes (AddressDescriptor_memattrs l) (AddressDescriptor_memattrs r) \<and>
-     AddressDescriptor_paddress l = AddressDescriptor_paddress r"
+Definition det_equiv_AddressDescriptor (l r : AddressDescriptor) : Prop :=
+   det_equiv_Fault (AddressDescriptor_fault l) (AddressDescriptor_fault r) /\
+   det_equiv_MemoryAttributes (AddressDescriptor_memattrs l) (AddressDescriptor_memattrs r) /\
+   AddressDescriptor_paddress l = AddressDescriptor_paddress r.
 
-definition det_equiv_DescriptorUpdate :: "DescriptorUpdate \<Rightarrow> DescriptorUpdate \<Rightarrow> bool" where
-  "det_equiv_DescriptorUpdate l r \<equiv>
-     DescriptorUpdate_AF l = DescriptorUpdate_AF r \<and>
-     DescriptorUpdate_AP l = DescriptorUpdate_AP r \<and>
-     det_equiv_AddressDescriptor (DescriptorUpdate_descaddr l) (DescriptorUpdate_descaddr r)"
+Definition det_equiv_DescriptorUpdate (l r : DescriptorUpdate) : Prop :=
+   DescriptorUpdate_AF l = DescriptorUpdate_AF r /\
+   DescriptorUpdate_AP l = DescriptorUpdate_AP r /\
+   det_equiv_AddressDescriptor (DescriptorUpdate_descaddr l) (DescriptorUpdate_descaddr r).
 
-definition det_equiv_TLBRecord :: "TLBRecord \<Rightarrow> TLBRecord \<Rightarrow> bool" where
-  "det_equiv_TLBRecord l r \<equiv>
-     det_equiv_Permissions (TLBRecord_perms l) (TLBRecord_perms r) \<and>
-     TLBRecord_nG l = TLBRecord_nG r \<and>
-     TLBRecord_contiguous l = TLBRecord_contiguous r \<and>
-     TLBRecord_level l = TLBRecord_level r \<and>
-     TLBRecord_blocksize l = TLBRecord_blocksize r \<and>
-     det_equiv_DescriptorUpdate (TLBRecord_descupdate l) (TLBRecord_descupdate r) \<and>
-     TLBRecord_CnP l = TLBRecord_CnP r \<and>
-     det_equiv_AddressDescriptor (TLBRecord_addrdesc l) (TLBRecord_addrdesc r)"
+Definition det_equiv_TLBRecord (l r : TLBRecord) : Prop :=
+   det_equiv_Permissions (TLBRecord_perms l) (TLBRecord_perms r) /\
+   TLBRecord_nG l = TLBRecord_nG r /\
+   TLBRecord_contiguous l = TLBRecord_contiguous r /\
+   TLBRecord_level l = TLBRecord_level r /\
+   TLBRecord_blocksize l = TLBRecord_blocksize r /\
+   det_equiv_DescriptorUpdate (TLBRecord_descupdate l) (TLBRecord_descupdate r) /\
+   TLBRecord_CnP l = TLBRecord_CnP r /\
+   det_equiv_AddressDescriptor (TLBRecord_addrdesc l) (TLBRecord_addrdesc r).
 
-lemmas det_equiv_defs =
+(*lemmas det_equiv_defs =
   det_equiv_Fault_def det_equiv_Permissions_def det_equiv_DescriptorUpdate_def det_equiv_AddressDescriptor_def
   det_equiv_MemoryAttributes_def det_equiv_MemAttrHints_def det_equiv_TLBRecord_def
 
-subsection \<open>Lemmas about auxiliary functions of our pure characterisation\<close>
-
+subsection \<open>Lemmas about auxiliary functions of our pure characterisation\<close>*)
+(* grainsize_split in Address_Translation_Pure
 lemma grainsize_cases:
   obtains "grainsize (read_params high s) = 12"
     | "grainsize (read_params high s) = 14"
     | "grainsize (read_params high s) = 16"
   by (fastforce simp: read_params_def Let_def split: if_splits)
+*)
+Lemma outputsize_calc_outputsize high s :
+  outputsize (read_params high s) =
+  calc_outputsize (slice (TCR_EL1 (ss_regstate s)) 32 _) (largegrain (read_params high s)).
+unfold read_params, outputsize, largegrain, grainsize.
+f_equal.
+match goal with |- ?l = _ => destruct l end.
+* reflexivity.
+* match goal with |- context[if ?c then _ else _] => destruct c end;
+  reflexivity.
+Qed.
 
-lemma outputsize_calc_outputsize:
-  "outputsize (read_params high s) =
-   calc_outputsize (Word.slice 32 (TCR_EL1 (regstate s))) (largegrain (read_params high s))"
-  by (auto simp: read_params_def Let_def)
+Lemma fst_calc_firstblocklevel_grainsize (*[simp]:*) high s :
+  fst (calc_firstblocklevel_grainsize (largegrain (read_params high s))
+                                        (midgrain (read_params high s))) =
+   firstblocklevel (read_params high s).
+unfold calc_firstblocklevel_grainsize, read_params, firstblocklevel,
+       largegrain, midgrain, grainsize.
+repeat match goal with |- context [if ?b then _ else _] =>
+  match type of b with
+  | bool => destruct b eqn:?
+  end end; simpl; try reflexivity; discriminate.
+Qed.
 
-lemma fst_calc_firstblocklevel_grainsize[simp]:
-  "fst (calc_firstblocklevel_grainsize (largegrain (read_params high s))
-                                       (midgrain (read_params high s))) =
-   firstblocklevel (read_params high s)"
-  by (auto simp: calc_firstblocklevel_grainsize_def read_params_def Let_def)
+Lemma snd_calc_firstblocklevel_grainsize (*[simp]:*) high s :
+  projT1 (snd (calc_firstblocklevel_grainsize (largegrain (read_params high s))
+                                                (midgrain (read_params high s)))) =
+   grainsize (read_params high s).
+unfold calc_firstblocklevel_grainsize, read_params, firstblocklevel,
+       largegrain, midgrain, grainsize.
+repeat match goal with |- context [if ?b then _ else _] =>
+  match type of b with
+  | bool => destruct b eqn:?
+  end end; simpl; try reflexivity; discriminate.
+Qed.
 
-lemma snd_calc_firstblocklevel_grainsize[simp]:
-  "snd (calc_firstblocklevel_grainsize (largegrain (read_params high s))
-                                       (midgrain (read_params high s))) =
-   grainsize (read_params high s)"
-  by (auto simp: calc_firstblocklevel_grainsize_def read_params_def Let_def)
-
+(* Address_Translation_Pure.grainsize_range covers this
 lemma grainsize_bounds[simp]:
   "0 \<le> grainsize (read_params high s)"
   "3 \<le> nat (grainsize (read_params high s))"
   "nat (grainsize (read_params high s)) \<le> 48"
-  by (auto simp: read_params_def Let_def)
+  by (auto simp: read_params_def Let_def)*)
 
-lemma PrePostE_baseaddress[PrePostE_atomI]:
-  "PrePostE (\<lambda>s. Q (baseaddress baseregister baselowerbound_arg outputsize_arg) s)
-            (liftS (calc_baseaddress baseregister baselowerbound_arg outputsize_arg)) Q E"
-  by (strong_cong_simp add: baseaddress_def calc_baseaddress_def)
-     (PrePostAuto simp: max_absorb1 max_absorb2)
+Lemma ze_eq m m' (w : mword m) (w' : mword m') n (H1:ArithFact (n >=? m)) n' (H2 : n = n') (H3 : ArithFact (n' >=? m')) :
+  EqdepFacts.eq_dep Z mword m w m' w' ->
+  EqdepFacts.eq_dep Z mword n (@zero_extend m w n H1) n' (@zero_extend m' w' n' H3).
+subst.
+intros H. revert H3. destruct H.
+intro.
+rewrite <- (ArithFact_irrelevant _ H1 H3).
+constructor.
+Qed.
 
+Lemma PrePostE_baseaddress (*[PrePostE_atomI]:*) baseregister baselowerbound_arg outputsize_arg H `{ArithFact (baselowerbound_arg >=? 0)} Q E :
+  PrePostE (Q (@baseaddress baseregister baselowerbound_arg H outputsize_arg))
+           (liftS (calc_baseaddress baseregister baselowerbound_arg outputsize_arg)) Q E.
+unfold liftS, baseaddress, calc_baseaddress.
+PrePostE_rewrite liftState.
+eapply PrePostE_strengthen_pre.
+repeat PrePostE_step.
+PPE_apply PrePostE_ZeroExtend_slice_append.
+cbv beta.
+destruct (outputsize_arg =? 52) eqn:size52.
+* simpl.
+  intros s q.
+  match goal with |- if ?c then _ else _ => destruct c eqn:blb at 1 end.
+  + intro. revert q.
+
+    (* TODO: adjust the spec to avoid this nonsense. *)
+    match goal with |- context [Address_Translation_Pure.anonymous_subproof ?a ?b ?c] =>
+      generalize (Address_Translation_Pure.anonymous_subproof a b c) end.
+    match goal with |- context [Address_Translation_Pure.anonymous_subproof0 ?a ?b ?c] =>
+      generalize (Address_Translation_Pure.anonymous_subproof0 a b c) end.
+    match goal with |- context [Address_Translation_Pure.anonymous_subproof1 ?a ?b ?c] =>
+      generalize (Address_Translation_Pure.anonymous_subproof1 a b c) end.
+
+    replace (Z.max baselowerbound_arg 6) with
+            (if sumbool_of_bool (baselowerbound_arg <? 6) then 6 else baselowerbound_arg).
+    - intros p1 p2 p3 q.
+      replace_ArithFact_proof.
+      replace_ArithFact_proof.
+      replace_ArithFact_proof.
+      simpl (projT1 (build_ex _)) in pf0, pf1, pf2.
+      rewrite <- (ArithFact_irrelevant _ p1 _).
+      rewrite <- (ArithFact_irrelevant _ p2 _).
+      rewrite <- (ArithFact_irrelevant _ p3 _).
+      apply q.
+    - unfold Z.max, Z.ltb.
+      destruct (baselowerbound_arg ?= 6); auto.
+  + destruct (baselowerbound_arg <? 6).
+    - simpl in blb. exfalso. rewrite Z.geb_leb in blb. unbool_comparisons. omega.
+    - simpl in blb. exfalso. rewrite Z.geb_leb in blb. prepare_for_solver. omega.
+
+* intros s q.
+  simpl (sumbool_of_bool false).
+  cbv beta match.
+  rewrite concat_zeros_extend in q.
+  match type of q with Q ?v _ => match goal with |- Q ?w _ => replace w with v end end.
+  apply q.
+  apply ZEqdep.eq_dep_eq.
+  eapply EqdepFacts.eq_dep_trans.
+  apply Mword.autocast_eq_dep.
+  apply ze_eq. omega.
+  repeat replace_ArithFact_proof.
+  revert pf pf0 pf1.
+  rewrite (Z.add_opp_l 48 baselowerbound_arg).
+  intros.
+  rewrite (ArithFact_irrelevant _ pf pf1).
+  constructor.
+Qed.
+
+(* In Address_Translation_Pure
 lemma startlevel_bounds[simp]:
   "startlevel (read_params high s) \<ge> 0"
   "startlevel (read_params high s) < 4"
   unfolding startlevel_def calc_startlevel_def[unfolded ceiling_divide_eq_div]
   by (auto simp: read_params_def Let_def)
+*)
 
-lemma aligned8_baseaddress[simp]:
-  fixes high :: bool and s :: "regstate sequential_state"
-  defines "p \<equiv> read_params high s"
-  shows "aligned (baseaddress baseregister (baselowerbound p) (outputsize p)) 8"
-proof -
-  have "baselowerbound p \<ge> 3"
-    unfolding baselowerbound_def startlevel_def calc_startlevel_def[unfolded ceiling_divide_eq_div]
-    by (auto simp: p_def read_params_def Let_def)
-  then show ?thesis
-    by (auto simp: baseaddress_def Let_def place_slice_def aligned8_simps)
-qed
+(* TODO: move to trivia *)
+Lemma aligned_autocast m n o (w : mword _) (EQ : ArithFact (m =? n)) :
+  aligned w o ->
+  aligned (@autocast _ _ _ w EQ) o.
+pose (EQ' := EQ). clearbody EQ'.
+destruct EQ' as [EQ'].
+apply Z.eqb_eq in EQ'.
+subst.
+rewrite Mword.autocast_eq.
+auto.
+Qed.
 
+(* TODO: move *)
+Lemma uint_plain_zeros n `{ArithFact (n >=? 0)} :
+  uint_plain (zeros n) = 0.
+unfold uint_plain, zeros.
+erewrite wordToN_eq_dep.
+2: apply Mword.get_cast_to_mword.
+rewrite wordToN_0.
+reflexivity.
+Qed.
+
+Lemma aligned8_baseaddress (*[simp]:*) high s baseregister :
+  let p := read_params high s in
+  aligned (baseaddress baseregister (baselowerbound p) (outputsize p)) 8.
+intro.
+assert (3 <= baselowerbound p) by apply (proj1 (baselowerbound_bounds high s)).
+revert H.
+replace_ArithFact_proof. revert pf.
+change (read_params high s) with p.
+generalize (baselowerbound p).
+intros blb blb_r blb_3.
+
+unfold baseaddress.
+destruct (outputsize p =? 52).
+* apply aligned_autocast.
+  apply aligned8_word_cat.
+  omega with Z.
+  unfold aligned.
+  simpl (projT1 _).
+  exists 0.
+  rewrite uint_plain_zeros.
+  reflexivity.
+* apply aligned_autocast.
+  apply aligned8_word_cat.
+  omega.
+  apply aligned8_word_cat.
+  omega.
+  unfold aligned.
+  exists 0.
+  simpl (projT1 _).
+  rewrite uint_plain_zeros.
+  reflexivity.
+Qed.
+(*
 lemma PrePostE_WalkAttrDecode:
   shows "PrePostE (\<lambda>s. \<forall>r. det_equiv_MemoryAttributes r (read_WalkAttrDecode SH_arg ORGN_arg IRGN_arg secondstage s) \<longrightarrow> Q r s)
                   (liftS (WalkAttrDecode SH_arg ORGN_arg IRGN_arg secondstage)) Q E"
@@ -703,3 +830,4 @@ theorem translate_address_sound:
      (auto simp: det_equiv_TLBRecord_def)
 
 end
+*)
