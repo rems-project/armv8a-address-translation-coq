@@ -1,10 +1,13 @@
-BBV_DIR=/home/bcampbe2/afs/rems/github/bbv
-SAIL_DIR=/home/bcampbe2/afs/rems/github/sail
-ARM_DIR=/home/bcampbe2/sail-arm-compute
+#BBV_DIR=/home/bcampbe2/afs/rems/github/bbv
+#SAIL_DIR=/home/bcampbe2/afs/rems/github/sail
+#ARM_DIR=/home/bcampbe2/sail-arm-compute
+BBV_DIR=../bbv
+SAIL_DIR=../sail
+ARM_DIR=/disk/scratch/bcampbe2/sail-arm
 
 COQ_LIBS = -R "$(BBV_DIR)/theories" bbv -R "$(SAIL_DIR)/lib/coq" Sail -R "$(ARM_DIR)/arm-v8.5-a" ''
 
-SRC=LoopExtract.v AArch64_Trivia.v AArch64_Aux.v Address_Translation_Orig.v Address_Translation_Pure.v
+SRC=Mword.v AArch64_Trivia.v AArch64_Aux.v Address_Translation_Orig.v Address_Translation_Pure.v
 
 TARGETS=$(SRC:.v=.vo)
 

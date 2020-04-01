@@ -157,11 +157,11 @@ Qed.
 Lemma PrePostE_baseaddress (*[PrePostE_atomI]:*) baseregister baselowerbound_arg outputsize_arg H `{ArithFact (baselowerbound_arg >=? 0)} Q E :
   PrePostE (Q (@baseaddress baseregister baselowerbound_arg H outputsize_arg))
            (liftS (calc_baseaddress baseregister baselowerbound_arg outputsize_arg)) Q E.
-unfold liftS, baseaddress, calc_baseaddress.
+unfold baseaddress, calc_baseaddress.
 PrePostE_rewrite liftState.
 eapply PrePostE_strengthen_pre.
 repeat PrePostE_step.
-PPE_apply PrePostE_ZeroExtend_slice_append.
+
 cbv beta.
 destruct (outputsize_arg =? 52) eqn:size52.
 * simpl.
@@ -211,6 +211,7 @@ destruct (outputsize_arg =? 52) eqn:size52.
   rewrite (ArithFact_irrelevant _ pf pf1).
   constructor.
 Qed.
+Hint Resolve PrePostE_baseaddress : PrePostE_specs.
 
 (* In Address_Translation_Pure
 lemma startlevel_bounds[simp]:

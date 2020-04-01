@@ -15,10 +15,13 @@ Local Open Scope Z.
 (* TODO: move *)
 Notation "v !! n" := (getBit v n) (at level 20).
 
+Hint Transparent bits : PrePostE_specs.
+
 (* TODO: produce an aarch64_lemmas file with this
   maybe needs a hint unfold, or possibly just use notation instead?
  *)
-Definition liftS {A E} := @liftState _ _ A E register_accessors.
+(*Definition liftS {A E} := @liftState _ _ A E register_accessors.*)
+Notation "'liftS' m" := (liftState register_accessors m) (at level 10).
 
 (*
 (*<*)
@@ -49,7 +52,7 @@ Definition AArchConsistent s := UsingAArch64 s = true -> __highest_el_aarch32 (s
 Lemma PrePostE_UsingAArch32 (*[PrePostE_atomI]:*) Q (E : ex exception -> predS _) :
   PrePostE (fun s => AArchConsistent s /\ Q (negb (UsingAArch64 s)) s)
            (liftS (UsingAArch32 tt)) Q E.
-unfold AArchConsistent, UsingAArch64, UsingAArch32, HighestELUsingAArch32, liftS, bind0.
+unfold AArchConsistent, UsingAArch64, UsingAArch32, HighestELUsingAArch32, bind0.
 PrePostE_rewrite liftState.
 simpl (negb (HaveAnyAArch32 tt)).
 cbn iota.
@@ -67,9 +70,11 @@ repeat PrePostE_step.
     destruct x; apply H.
 Qed.
 
+Hint Resolve PrePostE_UsingAArch32 : PrePostE_specs.
+
 Lemma PrePostE_HaveEL (Q : bool -> predS regstate) E el :
   PrePostE (Q true) (liftS (HaveEL el)) Q E.
-unfold HaveEL, liftS.
+unfold HaveEL.
 change (mword 2) with (word 2) in el.
 shatter_word el.
 destruct x, x0; 
@@ -78,7 +83,7 @@ Qed.
 
 Lemma PrePostE_HighestELUsingAArch32 (Q : bool -> predS regstate) E :
   PrePostE (fun s => Q (__highest_el_aarch32 (ss_regstate s)) s) (liftS (HighestELUsingAArch32 tt)) Q E.
-unfold liftS, HighestELUsingAArch32, UsingAArch64.
+unfold HighestELUsingAArch32, UsingAArch64.
 PrePostE_rewrite liftState.
 eapply PrePostE_strengthen_pre.
 apply PrePostE_readS.
@@ -90,8 +95,8 @@ lazymatch goal with
 | |- PrePostE _ _ ?q ?e => apply id with (Q := q) (E := e)
 end.
 
-Hint Extern 0 (PrePostE _ (liftState _ (HaveEL _)) _ _) => PPE_apply PrePostE_HaveEL : PrePostE_specs.
-Hint Extern 0 (PrePostE _ (liftState _ (HighestELUsingAArch32 _)) _ _) => PPE_apply PrePostE_HighestELUsingAArch32 : PrePostE_specs.
+Hint Resolve PrePostE_HaveEL : PrePostE_specs.
+Hint Resolve PrePostE_HighestELUsingAArch32 : PrePostE_specs.
 
 Definition HasAArch32EL el s := __highest_el_aarch32 (ss_regstate s) || negb (eq_vec el EL3).
 
@@ -120,7 +125,7 @@ end.
 
 Lemma PrePostE_HaveAArch32EL (Q : bool -> predS regstate) E el :
   PrePostE (fun s => Q (HasAArch32EL el s) s) (liftS (HaveAArch32EL el)) Q E.
-unfold HasAArch32EL, HaveAArch32EL, liftS.
+unfold HasAArch32EL, HaveAArch32EL.
 simpl (negb (HaveAnyAArch32 tt)).
 simpl (HighestEL tt).
 PrePostE_rewrite liftState.
@@ -137,6 +142,7 @@ compute in el.
 shatter_word el.
 destruct x, x0; auto.
 Qed.
+Hint Resolve PrePostE_HaveAArch32EL : PrePostE_specs.
 
 (* Ugh, the undefined case is annoying.  Ultimately determines the translation regime (where it's called directly for EL3 and on EL2 in ELIsInHost).  Let's avoid this...
 
@@ -164,7 +170,7 @@ Lemma PrePostE_ELUsingAArch32 (*[PrePostE_atomI]:*) (Q : bool -> predS regstate)
   PrePostE (fun s => el <> EL0 /\ AlwaysAArch64 s /\ Q false s) (liftS (ELUsingAArch32 el)) Q E.
 repeat unfold ELUsingAArch32, IsSecureBelowEL3, aget_SCR_GEN, get_SCR,
        (*HighestELUsingAArch32,*) ELStateUsingAArch32, ELStateUsingAArch32K,
-       HaveAArch32EL, HaveAnyAArch32, liftS.
+       HaveAArch32EL, HaveAnyAArch32.
 repeat match goal with
 | |- context [negb ?x] => simpl (negb x)
 | |- context [__IMPDEF_boolean ?s] => let t := constr:(__IMPDEF_boolean s) in
@@ -217,9 +223,11 @@ shatter_word el.
 destruct x, x0; compute in notEL0', EQ, EQ0, EQ1; discriminate.
 Qed.
 
+Hint Resolve PrePostE_ELUsingAArch32 : PrePostE_specs.
+
 Lemma PrePostE_IsSecureBelowEL3 (*[PrePostE_atomI]:*) (Q : bool -> predS regstate) E :
   PrePostE (fun s => AlwaysAArch64 s /\ Q (eq_bit (access_vec_dec (SCR_EL3 (ss_regstate s)) 0) B0) s) (liftS (IsSecureBelowEL3 tt)) Q E.
-unfold IsSecureBelowEL3, liftS, aget_SCR_GEN, get_SCR.
+unfold IsSecureBelowEL3, aget_SCR_GEN, get_SCR.
 PrePostE_rewrite liftState.
 
 let t := constr:(liftState register_accessors (HaveEL EL3)) in
@@ -246,11 +254,11 @@ unfold access_vec_dec, access_mword_dec in *.
 destruct (getBit (get_word (SCR_EL3 (ss_regstate s))) (Z.to_nat 0)); auto.
 Qed.
 
-Hint Extern 0 (PrePostE _ (liftState _ (IsSecureBelowEL3 _)) _ _) => PPE_apply PrePostE_IsSecureBelowEL3 : PrePostE_specs.
+Hint Resolve PrePostE_IsSecureBelowEL3 : PrePostE_specs.
 
 Lemma PrePostE_IsSecure (Q : bool -> predS regstate) E :
   PrePostE (fun s => AArchConsistent s /\ AlwaysAArch64 s /\ forall b, Q b s) (liftS (IsSecure tt)) Q E.
-unfold liftS, IsSecure.
+unfold IsSecure.
 
 PrePostE_rewrite liftState.
 
@@ -260,9 +268,7 @@ change t with t'.
 
 eapply PrePostE_strengthen_pre.
 repeat PrePostE_step.
-apply PrePostE_UsingAArch32.
 apply PrePostE_returnS.
-apply PrePostE_UsingAArch32.
 apply PrePostE_returnS.
 intros s [consistent [always64 q]].
 simpl.
@@ -270,7 +276,7 @@ split; auto.
 repeat (hammer_if; intros; try split; auto).
 Qed.
 
-Hint Extern 0 (PrePostE _ (liftState _ (IsSecure _)) _ _) => PPE_apply PrePostE_IsSecure : PrePostE_specs.
+Hint Resolve PrePostE_IsSecure : PrePostE_specs.
 
 Ltac split_ands :=
   repeat match goal with
@@ -280,12 +286,10 @@ Ltac split_ands :=
 
 Lemma PrePostE_IsSecureEL2Enabled (Q : bool -> predS regstate) E :
   PrePostE (fun s => AArchConsistent s /\ AlwaysAArch64 s /\ forall b, Q b s) (liftS (IsSecureEL2Enabled tt)) Q E.
-unfold IsSecureEL2Enabled, liftS.
+unfold IsSecureEL2Enabled.
 PrePostE_rewrite liftState.
 eapply PrePostE_strengthen_pre.
 repeat PrePostE_step.
-apply PrePostE_ELUsingAArch32; discriminate.
-apply PrePostE_ELUsingAArch32; discriminate.
 
 intros s [consistent [always64 q]].
 simpl (negb _).
@@ -294,7 +298,7 @@ hammer_if. split_ands; auto. discriminate. discriminate.
 hammer_if; auto.
 Qed.
 
-Hint Extern 0 (PrePostE _ (liftState _ (IsSecureEL2Enabled _)) _ _) => PPE_apply PrePostE_IsSecureEL2Enabled : PrePostE_specs.
+Hint Resolve PrePostE_IsSecureEL2Enabled : PrePostE_specs.
 
 Definition read_EL s := ProcState_EL (PSTATE (ss_regstate s)).
 (*lemmas [simp] = EL0_def EL1_def EL2_def EL3_def*)
@@ -332,12 +336,12 @@ Qed.
 Lemma PrePostE_ELIsInHost (*[PrePostE_atomI]:*) (el : word 2) Q E :
   PrePostE (fun s => AArchConsistent s /\ AlwaysAArch64 s /\ eq_bit (access_vec_dec (SCR_EL3 (ss_regstate s)) 0) B1 = true
 /\ Q (read_ELIsInHost el s) s) (liftS (ELIsInHost el)) Q E.
-unfold ELIsInHost, read_ELIsInHost, liftS.
+unfold ELIsInHost, read_ELIsInHost.
 PrePostE_rewrite liftState.
 
 eapply PrePostE_strengthen_pre.
 repeat PrePostE_step.
-apply PrePostE_ELUsingAArch32.
+
 intros s [consistent [always64 [notsecure q]]].
 split; auto; split; auto.
 intros.
@@ -352,6 +356,8 @@ all: try apply q.
 
 all: destruct_access_vec_dec (HCR_EL2 (ss_regstate s)) 27; apply q.
 Qed.
+
+Hint Resolve PrePostE_ELIsInHost : PrePostE_specs.
 
 Definition read_S1TranslationRegime (el : mword 2) (s : sequential_state regstate) : mword 2 :=
   if eq_vec el EL0 then (if read_ELIsInHost EL0 s then EL2 else EL1) else el.
@@ -375,12 +381,10 @@ Qed.
 
 Lemma PrePostE_S1TranslationRegime__0 (*[PrePostE_atomI]:*) el Q E :
   PrePostE (fun s => AArchConsistent s /\ AlwaysAArch64 s /\ eq_bit (access_vec_dec (SCR_EL3 (ss_regstate s)) 0) B1 = true /\ Q (read_S1TranslationRegime el s) s) (liftS (S1TranslationRegime__0 el)) Q E.
-unfold S1TranslationRegime__0, read_S1TranslationRegime, liftS, get_SCR.
+unfold S1TranslationRegime__0, read_S1TranslationRegime, get_SCR.
 PrePostE_rewrite liftState.
 eapply PrePostE_strengthen_pre.
 repeat PrePostE_step.
-apply PrePostE_ELIsInHost.
-apply PrePostE_ELUsingAArch32.
 
 intros s (consistent & always64 & notsecure & q).
 hammer_if.
@@ -397,15 +401,18 @@ hammer_if.
   destruct (read_ELIsInHost EL0 s); apply q.
 Qed.
 
+Hint Resolve PrePostE_S1TranslationRegime__0 : PrePostE_specs.
+
 Lemma PrePostE_S1TranslationRegime__1 (*[PrePostE_atomI]:*) Q E :
   PrePostE (fun s => AArchConsistent s /\ AlwaysAArch64 s /\ eq_bit (access_vec_dec (SCR_EL3 (ss_regstate s)) 0) B1 = true /\ Q (read_S1TranslationRegime (read_EL s) s) s) (liftS (S1TranslationRegime__1 tt)) Q E.
-unfold S1TranslationRegime__1, liftS.
+unfold S1TranslationRegime__1.
 PrePostE_rewrite liftState.
 eapply PrePostE_strengthen_pre.
 repeat PrePostE_step.
-apply PrePostE_S1TranslationRegime__0.
+
 intuition.
 Qed.
+Hint Resolve PrePostE_S1TranslationRegime__1 : PrePostE_specs.
 
 Definition read_SCTLR (regime : mword 2) (s : sequential_state regstate) : mword 64 :=
   if eq_vec regime EL2 then SCTLR_EL2 (ss_regstate s) else
@@ -414,10 +421,9 @@ Definition read_SCTLR (regime : mword 2) (s : sequential_state regstate) : mword
 
 Lemma PrePostE_aget_SCTLR__0 (*[PrePostE_atomI]:*) regime Q (E : ex exception -> predS _) :
   PrePostE (fun s => if eq_vec regime EL0 then forall msg, E (Failure msg) s else Q (read_SCTLR regime s) s) (liftS (aget_SCTLR__0 regime)) Q E.
-unfold liftS, aget_SCTLR__0, read_SCTLR, Unreachable.
+unfold aget_SCTLR__0, read_SCTLR, Unreachable.
 PrePostE_rewrite liftState.
 PrePostE_rewrite state.
-PrePostE_rewrite liftState.
 
 eapply PrePostE_strengthen_pre.
 repeat PrePostE_step.
@@ -427,19 +433,20 @@ compute in regime.
 shatter_word regime.
 destruct x, x0; simpl; auto.
 Qed.
+Hint Resolve PrePostE_aget_SCTLR__0 : PrePostE_specs.
 
 Lemma PrePostE_aget_SCTLR__1 (*[PrePostE_compositeI]:*) Q E :
   PrePostE (fun s => AArchConsistent s /\ AlwaysAArch64 s /\ eq_bit (access_vec_dec (SCR_EL3 (ss_regstate s)) 0) B1 = true /\ Q (read_SCTLR (read_S1TranslationRegime (read_EL s) s) s) s) (liftS (aget_SCTLR__1 tt)) Q E.
-unfold aget_SCTLR__1, liftS.
+unfold aget_SCTLR__1.
 PrePostE_rewrite liftState.
 eapply PrePostE_strengthen_pre.
 repeat PrePostE_step.
-apply PrePostE_aget_SCTLR__0.
-apply PrePostE_S1TranslationRegime__1.
+
 intuition.
 rewrite read_S1TranslationRegime_eq_0_false.
 assumption.
 Qed.
+Hint Resolve PrePostE_aget_SCTLR__1 : PrePostE_specs.
 
 Definition read_bigendian (s : sequential_state regstate) : bool :=
   read_SCTLR (read_S1TranslationRegime (read_EL s) s) s !! 25.
@@ -451,7 +458,7 @@ Definition read_MAIR (regime : mword 2) (s : sequential_state regstate) : mword 
 
 Lemma PrePostE_aget_MAIR__0 (*[PrePostE_atomI]:*) (regime : mword 2) Q (E : _ -> _ -> Prop) :
   PrePostE (fun s => if eq_vec regime $0 then forall msg, E (Failure msg) s else Q (read_MAIR regime s) s) (liftS (aget_MAIR__0 regime)) Q E.
-unfold aget_MAIR__0, read_MAIR, Unreachable, liftS.
+unfold aget_MAIR__0, read_MAIR, Unreachable.
 PrePostE_rewrite liftState.
 eapply PrePostE_strengthen_pre.
 repeat PrePostE_step.
@@ -462,20 +469,20 @@ compute in regime.
 shatter_word regime.
 destruct x, x0; apply H.
 Qed.
+Hint Resolve PrePostE_aget_MAIR__0 : PrePostE_specs.
 
 Lemma PrePostE_aget_MAIR__1 (*[PrePostE_atomI]:*) Q E :
   PrePostE (fun s => AArchConsistent s /\ AlwaysAArch64 s /\ eq_bit (access_vec_dec (SCR_EL3 (ss_regstate s)) 0) B1 = true /\ Q (read_MAIR (read_S1TranslationRegime (read_EL s) s) s) s) (liftS (aget_MAIR__1 tt)) Q E.
-unfold aget_MAIR__1, liftS.
+unfold aget_MAIR__1.
 PrePostE_rewrite liftState.
 eapply PrePostE_strengthen_pre.
 repeat PrePostE_step.
-apply PrePostE_aget_MAIR__0.
-apply PrePostE_S1TranslationRegime__1.
 
 intuition.
 rewrite read_S1TranslationRegime_eq_0_false.
 assumption.
 Qed.
+Hint Resolve PrePostE_aget_MAIR__1 : PrePostE_specs.
 
 Definition read_mem_word {addrsize : Z} (addr : mword addrsize) (len : Z) `{ArithFact (len >=? 0)} (s : sequential_state regstate) : option (mword (8 * len)) :=
   option_bind (get_mem_bytes (wordToNat (get_word addr)) (Z.to_nat len) s)
@@ -483,7 +490,7 @@ Definition read_mem_word {addrsize : Z} (addr : mword addrsize) (len : Z) `{Arit
 
 Lemma PrePostE_read_ram (*[PrePostE_atomI]:*) addrsize (addr : mword addrsize) len `{ArithFact (len >=? 0)} hexRAM Q (E : ex exception -> _ -> Prop) :
   PrePostE (fun s => (exists w, read_mem_word addr len s = Some w /\ Q w s)) (liftS (aarch64_extras.read_ram addrsize len hexRAM addr)) Q E.
-unfold aarch64_extras.read_ram, liftS.
+unfold aarch64_extras.read_ram.
 PrePostE_rewrite liftState.
 unfold read_memS, read_memtS, read_memt_bytesS.
 
@@ -503,6 +510,7 @@ intro EQ'.
 rewrite EQ'.
 apply q.
 Qed.
+Hint Resolve PrePostE_read_ram : PrePostE_specs.
 
 Definition AddressDescriptor_physicaladdress d := FullAddress_address (AddressDescriptor_paddress d).
 
@@ -942,7 +950,7 @@ Lemma PrePostE_aget__Mem (*[PrePostE_atomI]:*) len `{ArithFact (len >=? 0)} desc
 (eq_vec (read_CNTControlBase s) $0 || neq_vec (and_vec (AddressDescriptor_physicaladdress desc) __CNTControlMask) (read_CNTControlBase s) = true) /\
                  (match read_mem_word (AddressDescriptor_physicaladdress desc) len s with Some w => Q w s | None => False end))
             (liftS (aget__Mem desc len accdesc)) Q E.
-unfold liftS, aget__Mem, Align__1, Align__0, __ReadMemory, __ReadRAM, ZeroExtend__1, ZeroExtend__0, undefined_FaultRecord, aarch64_extras.undefined_int, undefined_FullAddress, undefined_AccType, undefined_Fault, aarch64_extras.internal_pick.
+unfold aget__Mem, Align__1, Align__0, __ReadMemory, __ReadRAM, ZeroExtend__1, ZeroExtend__0, undefined_FaultRecord, aarch64_extras.undefined_int, undefined_FullAddress, undefined_AccType, undefined_Fault, aarch64_extras.internal_pick.
 
 unfold __trickbox_enabled.
 rewrite !Bool.andb_false_l.
@@ -952,14 +960,7 @@ PrePostE_rewrite state.
 
 eapply PrePostE_strengthen_pre.
 repeat PrePostE_step.
-
 * apply PrePostE_impossible.
-* PPE_apply PrePostE_read_ram.
-* PPE_apply PrePostE_readS.
-* apply PrePostE_read_ram.
-* PPE_apply PrePostE_readS.
-*  apply PrePostE_read_ram.
-* PPE_apply PrePostE_readS.
 * apply PrePostE_impossible.
 * apply PrePostE_impossible.
 * apply PrePostE_impossible.
@@ -1024,6 +1025,7 @@ repeat PrePostE_step.
       replace_ArithFact_proof.
       split; auto.
 Qed.
+Hint Resolve PrePostE_aget__Mem : PrePostE_specs.
 
 Definition write_mem_bytes (addr : nat) (len : Z) (bytes : list (list bitU)) (s : sequential_state regstate) : sequential_state regstate :=
   put_mem_bytes addr (Z.to_nat len) bytes B0 (* tag *) s.
@@ -1037,7 +1039,7 @@ Lemma PrePostE_write_ram addrlen len hexRAM addr w Q (E : ex exception -> predS 
                      | Some bytes => Q tt (write_mem_bytes (wordToNat (get_word addr)) len bytes s)
                      end)
             (liftS (aarch64_extras.write_ram addrlen len hexRAM addr w)) Q E.
-unfold aarch64_extras.write_ram, liftS.
+unfold aarch64_extras.write_ram.
 PrePostE_rewrite liftState.
 PrePostE_rewrite state.
 unfold write_memS, write_memtS.
@@ -1050,6 +1052,8 @@ destruct (mem_bytes_of_bits w).
   intros r s' [EQ | []]. injection EQ as; subst.
   apply pre.
 Qed.
+Hint Resolve PrePostE_write_ram : PrePostE_specs.
+
 (*
 lemmas undefined_defs = undefined_MemoryAttributes_def undefined_MemType_def
   undefined_DeviceType_def undefined_MemAttrHints_def undefined_Permissions_def
@@ -1153,7 +1157,7 @@ lemma PrePostE_ZeroExtend_slice_append[PrePostE_atomI]:
 
 Lemma PrePostE_ZeroExtend__0 m n (xs : mword m) `{H1:ArithFact (n >=? m)} H2 (Q : mword n -> predS regstate) E :
   PrePostE (Q (zero_extend xs n)) (liftS (@ZeroExtend__0 _ xs n H2)) Q E.
-unfold liftS, ZeroExtend__0, aarch64_extras.length, length_mword.
+unfold ZeroExtend__0, aarch64_extras.length, length_mword.
 PrePostE_rewrite liftState.
 eapply PrePostE_strengthen_pre.
 repeat PrePostE_step.
@@ -1170,22 +1174,24 @@ rewrite !Mword.autocast_eq.
 generalize_ArithFact_proof_in q.
 apply q.
 Qed.
+Hint Resolve PrePostE_ZeroExtend__0 : PrePostE_specs.
 
 Lemma PrePostE_ZeroExtend__1 m n (xs : mword m) `{H1:ArithFact (n >=? m)} H2 (Q : mword n -> predS regstate) E :
   PrePostE (Q (zero_extend xs n)) (liftS (@ZeroExtend__1 _ n xs H2)) Q E.
 unfold ZeroExtend__1.
 apply PrePostE_ZeroExtend__0.
 Qed.
+Hint Resolve PrePostE_ZeroExtend__1 : PrePostE_specs.
 
 Lemma PrePostE_ZeroExtend_slice_append a b (xs : mword a) i l (ys : mword b) n (Q : mword n -> predS regstate) E H0 H1 H2 H3 :
   PrePostE (Q (@zero_extend _ (concat_vec (@slice _ xs i l H0) ys) n H1))
            (liftS (@ZeroExtend_slice_append l _ _ n xs i l ys H2 H3))
            Q E.
-unfold liftS, ZeroExtend_slice_append.
+unfold ZeroExtend_slice_append.
 PrePostE_rewrite liftState.
 eapply PrePostE_strengthen_pre.
 repeat PrePostE_step.
-PPE_apply PrePostE_ZeroExtend__1.
+
 intros s q.
 cbv beta.
 match goal with |- if ?c then _ else _ => destruct c eqn:guard at 1 end.
@@ -1200,6 +1206,7 @@ exfalso.
 prepare_for_solver.
 omega.
 Qed.
+Hint Resolve PrePostE_ZeroExtend_slice_append : PrePostE_specs.
 
 (*
 
@@ -1282,14 +1289,10 @@ end.
 
 Lemma PrePostE_AddrTop_EL0 el address isinstr Q E :
   PrePostE (fun s => AArchConsistent s /\ AlwaysAArch64 s /\ eq_bit (access_vec_dec (SCR_EL3 (ss_regstate s)) 0) B1 = true /\ read_S1TranslationRegime el s = $1 /\ Q (read_AddrTop_EL0 address isinstr s) s) (liftS (AddrTop address isinstr el)) Q E.
-unfold AddrTop, liftS.
+unfold AddrTop.
 PrePostE_rewrite liftState.
 eapply PrePostE_strengthen_pre.
 repeat PrePostE_step.
-apply PrePostE_ELIsInHost.
-apply PrePostE_ELUsingAArch32.
-apply PrePostE_S1TranslationRegime__0.
-apply PrePostE_assert_expS'.
 
 intros s (aarchconsistent & always64 & el3 & s1regime & q).
 intros _.
@@ -1314,6 +1317,7 @@ split_ands; auto.
     destruct isinstr;
     apply q.
 Qed.
+Hint Resolve PrePostE_AddrTop_EL0 : PrePostE_specs.
 (*
 lemma PrePostE_undefined_AddressDescriptor[PrePostE_atomI]:
   "PrePostE (\<lambda>s. \<forall>f a b ba bb bc t d bd be bf.
