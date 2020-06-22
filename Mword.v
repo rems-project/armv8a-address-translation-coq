@@ -1,4 +1,6 @@
-Require Import Word Sail2_values Sail2_operators_mwords.
+Require Import bbv.Word Sail.Values Sail.Operators_mwords.
+
+Local Open Scope Z.
 
 Lemma cast_T_eq_dep (T : Z -> Type) (m n : Z) (x : T m) E :
   EqdepFacts.eq_dep Z T n (cast_T x E) m x.

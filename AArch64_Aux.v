@@ -1,7 +1,7 @@
-Require Import Sail2_values Sail2_operators_mwords Word.
-Require Import Sail2_prompt_monad Sail2_prompt.
-Require Import Sail2_state_monad Sail2_state Sail2_state_lifting Hoare.
-Require Import Sail2_state_monad_lemmas Sail2_state_lemmas.
+Require Import Sail.Values Sail.Operators_mwords bbv.Word.
+Require Import Sail.Prompt_monad Sail.Prompt.
+Require Import Sail.State_monad Sail.State Sail.State_lifting Sail.Hoare.
+Require Import Sail.State_monad_lemmas Sail.State_lemmas.
 Require Import Setoid Equivalence.
 Require Import aarch64_types aarch64 AArch64_Trivia.
 
@@ -1157,7 +1157,7 @@ lemma PrePostE_ZeroExtend_slice_append[PrePostE_atomI]:
 
 Lemma PrePostE_ZeroExtend__0 m n (xs : mword m) `{H1:ArithFact (n >=? m)} H2 (Q : mword n -> predS regstate) E :
   PrePostE (Q (zero_extend xs n)) (liftS (@ZeroExtend__0 _ xs n H2)) Q E.
-unfold ZeroExtend__0, aarch64_extras.length, length_mword.
+unfold ZeroExtend__0.
 PrePostE_rewrite liftState.
 eapply PrePostE_strengthen_pre.
 repeat PrePostE_step.
@@ -1168,6 +1168,7 @@ intro GE'.
 rewrite concat_zeros_extend.
 repeat replace_ArithFact_proof.
 revert pf pf0.
+unfold aarch64_extras.length, length_mword.
 replace (n - m + m) with n by omega.
 intros.
 rewrite !Mword.autocast_eq.

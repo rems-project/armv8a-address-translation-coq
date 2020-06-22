@@ -1,4 +1,4 @@
-Require Import Sail2_values Sail2_prompt_monad Sail2_prompt.
+Require Import Sail.Values Sail.Prompt_monad Sail.Prompt.
 From Ltac2 Require Import Ltac2 Std Message.
 From Ltac2 Require Constr.
 

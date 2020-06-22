@@ -1,5 +1,7 @@
 Require Import aarch64_types aarch64.
-Require Import ZArith Sail2_prompt_monad Sail2_prompt Word Sail2_real Sail2_values.
+Require Import ZArith Sail.Prompt_monad Sail.Prompt bbv.Word Sail.Real Sail.Values.
+
+Local Open Scope Z.
 
 (*
 (*<*)
@@ -132,7 +134,7 @@ Ltac2 loop_body fn appliedfn :=
 End loopbodydef.
 *)
 (*
-Goal forall (x : Sail2_values.mword 16), True.
+Goal forall (x : Sail.Values.mword 16), True.
   intro x.
   set (tm := _ChooseRandomNonExcludedTag x).
 cbn delta [_ChooseRandomNonExcludedTag] in tm.
@@ -208,7 +210,7 @@ Definition TranslationTableWalk_loop_body
                                           (TLBRecord + exception).
 assert (Acc (Zwf 0) 1) as acc.
 apply Zwf_guarded.
-generalize (Sail2_operators_mwords.vec_of_bits (Sail2_values.B0::nil)). intro s1_nonsecure.
+generalize (Sail.Operators_mwords.vec_of_bits (Sail.Values.B0::nil)). intro s1_nonsecure.
 generalize 1. intro size.
 destruct acc as [acc].
 
@@ -547,7 +549,7 @@ Definition
 *)
 *)
 Import List.ListNotations.
-Import Sail2_values Sail2_operators_mwords.
+Import Sail.Values Sail.Operators_mwords.
 
 Definition calc_outputsize (PS : mword 3) (largegrain : bool) : Z :=
   if eq_vec PS (vec_of_bits [B0; B0; B0]) then 32

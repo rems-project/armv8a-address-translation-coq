@@ -1,4 +1,4 @@
-Require Import Sail2_values Sail2_values_lemmas Sail2_operators_mwords Sail2_state_monad Word.
+Require Import Sail.Values Sail.Values_lemmas Sail.Operators_mwords Sail.State_monad bbv.Word.
 Require Import aarch64_types aarch64 Address_Translation_Orig AArch64_Aux.
 
 Import Word.Notations.
@@ -127,7 +127,7 @@ Definition startlevel (p : Parameters) : Z :=
 Lemma startlevel_bounds high s :
   0 <= startlevel (read_params high s) < 4.
 unfold startlevel, read_params, calc_startlevel, inputsize, grainsize.
-rewrite Sail2_real.round_up_div.
+rewrite Sail.Real.round_up_div.
 
 split.
 apply Zle_minus_le_0.
@@ -162,7 +162,7 @@ Lemma startlevel_largegrain_bounds high s p :
   1 <= startlevel p.
 intros -> GRAINSIZE.
 unfold startlevel, read_params, calc_startlevel, inputsize, grainsize in *.
-rewrite Sail2_real.round_up_div.
+rewrite Sail.Real.round_up_div.
 2,3: repeat match goal with |- context[if ?b then _ else _] => destruct b end;
 try match goal with |- context[uint ?v] => destruct (uint v) as [i [H]]; simpl (projT1 _) end;
 try simpl in H;
@@ -205,7 +205,7 @@ Lemma baselowerbound_bounds high s :
 unfold baselowerbound, read_params, startlevel, calc_startlevel, grainsize, inputsize.
 match goal with |- context[uint ?v] => destruct (uint v) as [i [H1]]; simpl (projT1 _) end;
 simpl in H1.
-rewrite Sail2_real.round_up_div.
+rewrite Sail.Real.round_up_div.
 
 split;
 
